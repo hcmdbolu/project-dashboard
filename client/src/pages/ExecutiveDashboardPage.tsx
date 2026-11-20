@@ -98,7 +98,7 @@ export const ExecutiveDashboardPage: React.FC = () => {
       <section className="rounded-2xl border border-gsl-700/15 bg-gradient-to-r from-gsl-700 via-gsl-600 to-slate-800 p-5 text-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <GslLogo className="h-12 w-12 shrink-0 rounded-xl ring-1 ring-white/25" />
+            <GslLogo className="h-12 w-12 shrink-0" />
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wider text-emerald-200">

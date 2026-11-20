@@ -252,7 +252,7 @@ export const ReportsPage: React.FC = () => {
       <div className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5">
           <div className="flex items-center gap-3.5">
-            <GslLogo className="h-12 w-12 rounded-xl" />
+            <GslLogo className="h-12 w-12 shrink-0" />
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-gsl-700">
                 {GOVERNANCE_META.organization} •{' '}

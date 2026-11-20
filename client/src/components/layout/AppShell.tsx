@@ -85,7 +85,7 @@ export const AppShell: React.FC = () => {
   const SidebarContent = (
     <div className="flex h-full flex-col bg-gsl-700 text-white">
       <div className="flex items-center gap-3 border-b border-gsl-600/70 px-5 py-5">
-        <GslLogo className="h-10 w-10 shrink-0 rounded-xl ring-1 ring-white/20" />
+        <GslLogo className="h-10 w-10 shrink-0" />
         <div className="min-w-0">
           <p className="truncate text-[11px] font-semibold uppercase tracking-wider text-emerald-200">
             {GOVERNANCE_META.organization}
@@ -186,7 +186,7 @@ export const AppShell: React.FC = () => {
               <Menu className="h-5 w-5" />
             </button>
             <div className="flex items-center gap-2.5 lg:hidden">
-              <GslLogo className="h-8 w-8 rounded-lg" />
+              <GslLogo className="h-8 w-8" />
             </div>
             <div>
               <h2 className="text-lg font-bold tracking-tight text-slate-900">

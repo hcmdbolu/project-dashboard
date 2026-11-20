@@ -53,7 +53,7 @@ export const LoginPage: React.FC = () => {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gsl-900 via-gsl-700 to-slate-800 px-4 py-12">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white p-8 shadow-2xl">
         <div className="mb-6 flex items-center gap-3">
-          <GslLogo className="h-11 w-11 shrink-0 rounded-xl" />
+          <GslLogo className="h-11 w-11 shrink-0" />
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-gsl-700">
               {GOVERNANCE_META.organization} • Enterprise Operations

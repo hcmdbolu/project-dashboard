@@ -49,7 +49,7 @@ Follow these steps in order to deploy the **GSL Enterprise Portfolio Management 
 5. Copy your Render URL (e.g. `https://gsl-enterprise-portfolio-api.onrender.com`) and verify it in a browser by visiting:
    ```text
    https://gsl-enterprise-portfolio-api.onrender.com/api/health
-   ```
+   ```   
    You should see `{"status":"ok","service":"gsl-enterprise-portfolio-api",...}`.
 
 ---
