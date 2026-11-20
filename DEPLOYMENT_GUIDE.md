@@ -19,11 +19,17 @@ Follow these steps in order to deploy the **GSL Enterprise Portfolio Management 
 5. Create your first **Super Admin** account:
    - Go to **Authentication -> Users -> Add user -> Create new user**.
    - Enter your email and password, check **Auto Confirm User**, and click **Create user**.
-   - Return to **SQL Editor** and run (replacing the email and full name with yours):
+   - Return to **SQL Editor** and run (replacing the email and full name with yours — this works even if you created the Auth user before running `001_initial_schema.sql`):
      ```sql
-     UPDATE public.profiles
-     SET role = 'Super Admin', full_name = 'Your Full Name'
-     WHERE email = 'your-email@greenspringsschool.com';
+     INSERT INTO public.profiles (id, full_name, email, role, campus)
+     SELECT id, 'Your Full Name', email, 'Super Admin', 'All Campuses'
+     FROM auth.users
+     WHERE lower(email) = lower('your-email@greenspringsschool.com')
+     ON CONFLICT (id) DO UPDATE
+     SET role = 'Super Admin', full_name = EXCLUDED.full_name;
+
+     -- Verify it returned 1 row with role = Super Admin:
+     SELECT id, email, role, full_name FROM public.profiles;
      ```
 
 ---

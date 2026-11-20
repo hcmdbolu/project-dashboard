@@ -53,7 +53,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .from('profiles')
       .select('id, full_name, email, role, department_id, campus, created_at, updated_at')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Auth] Failed to query public.profiles:', error.message);
+    } else if (!data) {
+      console.warn(
+        `[Auth] No row found in public.profiles for user ${userId} (${fallbackEmail}). Run the Super Admin upsert SQL in DEPLOYMENT_GUIDE.md.`
+      );
+    }
 
     if (!error && data) {
       setProfile(data as Profile);
@@ -79,22 +87,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
-      setSession(data.session);
       if (data.session?.user) {
         await loadProfile(data.session.user.id, data.session.user.email ?? '');
       }
+      if (!mounted) return;
+      setSession(data.session);
       setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      setSession(newSession);
       if (newSession?.user) {
+        setLoading(true);
         await loadProfile(newSession.user.id, newSession.user.email ?? '');
       } else {
         setProfile(null);
       }
+      setSession(newSession);
       setLoading(false);
     });
 
