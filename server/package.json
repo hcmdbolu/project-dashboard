@@ -2,7 +2,10 @@
   "name": "gsl-it-portfolio-server",
   "version": "1.0.0",
   "private": true,
-  "description": "GSL IT Portfolio Management Express API for Railway",
+  "description": "GSL Enterprise Portfolio Management Express API for Render",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

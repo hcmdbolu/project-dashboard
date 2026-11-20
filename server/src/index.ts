@@ -12,6 +12,8 @@ import portfolioRouter from './routes/portfolio';
 const app = express();
 const port = Number(process.env.PORT || 4000);
 
+app.set('trust proxy', 1);
+
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -26,6 +28,14 @@ app.use(
 );
 app.use(express.json({ limit: '2mb' }));
 
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    service: 'gsl-enterprise-portfolio-api',
+    health: '/api/health',
+  });
+});
+
 app.use('/api/health', healthRouter);
 app.use('/api/portfolio', portfolioRouter);
 app.use('/api/admin', adminRouter);
@@ -39,7 +49,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`GSL Enterprise Portfolio API listening on port ${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`GSL Enterprise Portfolio API listening on 0.0.0.0:${port}`);
   startOverdueActionsCron();
 });

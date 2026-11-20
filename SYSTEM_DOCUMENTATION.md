@@ -2,7 +2,7 @@
 
 **Organization:** Greensprings School (GSL) — IT Department  
 **Version:** v2.0  
-**Target Hosting:** Vercel (Frontend), Railway (Express API), Supabase (PostgreSQL, Auth, Realtime)
+**Target Hosting:** Vercel (Frontend), Render (Express API), Supabase (PostgreSQL, Auth, Realtime)
 
 ---
 
@@ -19,7 +19,7 @@ The **GSL IT Portfolio Management Dashboard** replaces manual Excel project trac
                 │ HTTPS + Supabase JWT                    │ HTTPS + Bearer JWT
                 ▼                                         ▼
 ┌───────────────────────────────┐         ┌───────────────────────────────┐
-│     Supabase Platform         │         │    Railway Express API        │
+│     Supabase Platform         │         │    Render Express API         │
 │ • Auth (Email/Password JWT)   │         │ • /api/health                 │
 │ • PostgreSQL + RLS Policies   │◄────────┤ • /api/portfolio/* (CSV/Bulk) │
 │ • Realtime (postgres_changes) │ Service │ • /api/admin/* (Role Mgmt)    │
@@ -92,7 +92,7 @@ Access is enforced across three layers so view-only users cannot bypass UI restr
 | `/portfolio` | `MasterPortfolioPage` | All authenticated | Searchable, filterable Master IT Project Tracker with inline editing, CSV export, and full project modal |
 | `/projects/:id` | `ProjectDetailPage` | All authenticated | Project Charter: ownership matrix, priority breakdown, financials, benefits/outcomes, and CRUD for project risks/actions |
 | `/governance` | `RisksAndActionsPage` | All authenticated | Global Leadership Action Register and Risk Register |
-| `/admin/users` | `UserManagementPage` | `admin` only | Assigns `executive`, `project_manager`, or `admin` roles via the Railway Express API |
+| `/admin/users` | `UserManagementPage` | `admin` only | Assigns `executive`, `project_manager`, or `admin` roles via the Render Express API |
 
 ### 4.2 Executive Dashboard Flow (`ExecutiveDashboardPage.tsx`)
 1. **Portfolio Snapshot & Governance Header (Top):** GSL crest (`GslLogo`), organization/department metadata, document version (`v2.0`), owner, review date, and the **Review & Reporting Cadence** strip (Weekly IT Review, Monthly Executive Review, Quarterly Portfolio Review).
@@ -120,13 +120,13 @@ Access is enforced across three layers so view-only users cannot bypass UI restr
 
 ## 5. Backend API & Automation (`server/`)
 
-Deployable on Railway (`server/railway.json`). Uses `helmet`, `cors`, `express.json`, and `zod` validation.
+Deployable on Render (`render.yaml` at repo root with `rootDir: server`). Uses `helmet`, `cors`, `express.json`, and `zod` validation.
 
 ### 5.1 Endpoints
 
 | Method & Path | Auth / Role | Purpose |
 | :--- | :--- | :--- |
-| `GET /api/health` | Public | Railway health check (`status: 'ok'`). |
+| `GET /api/health` | Public | Render health check (`status: 'ok'`). |
 | `GET /api/portfolio/summary` | Authenticated | Server-side aggregated KPIs across `projects`, `risks`, and `leadership_actions`. |
 | `GET /api/portfolio/export` | Authenticated | Downloads RFC-4180 escaped CSV (`gsl-it-portfolio.csv`) ordered by `priority_score` descending. |
 | `POST /api/portfolio/import` | `project_manager`, `admin` | Zod-validated bulk upsert (up to 200 projects per call) matching on `project_id`. |
@@ -146,6 +146,6 @@ Deployable on Railway (`server/railway.json`). Uses `helmet`, `cors`, `express.j
    ```sql
    UPDATE public.profiles SET role = 'admin' WHERE email = 'admin@greenspringsschool.com';
    ```
-2. **Railway (`server/`):** Set root directory to `server`, configure `PORT`, `CORS_ORIGIN` (your Vercel URL), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `ENABLE_OVERDUE_CRON=true`.
-3. **Vercel (`client/`):** Set root directory to `client`, configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL` (your Railway URL), and `VITE_CURRENCY_CODE=NGN`. `client/vercel.json` handles SPA client-side routing rewrites.
+2. **Render (`server/`):** Deploy via the root `render.yaml` Blueprint (or create a Node Web Service with Root Directory `server`, Build Command `npm install && npm run build`, Start Command `npm start`, Health Check Path `/api/health`), and configure `CORS_ORIGIN` (your Vercel URL), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `ENABLE_OVERDUE_CRON=true`.
+3. **Vercel (`client/`):** Set root directory to `client`, configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL` (your Render service URL), and `VITE_CURRENCY_CODE=NGN`. `client/vercel.json` handles SPA client-side routing rewrites.
 

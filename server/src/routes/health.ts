@@ -5,7 +5,7 @@ const router = Router();
 router.get('/', (_req, res) => {
   res.json({
     status: 'ok',
-    service: 'gsl-it-portfolio-server',
+    service: 'gsl-enterprise-portfolio-api',
     timestamp: new Date().toISOString(),
   });
 });

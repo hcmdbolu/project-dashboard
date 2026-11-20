@@ -5,7 +5,7 @@ A full-stack IT Portfolio Governance & Management web application for **Greenspr
 ## Architecture
 
 - **`client/`** — React 18, TypeScript, Vite, Tailwind CSS, Recharts (deployable to **Vercel**)
-- **`server/`** — Node.js, Express, TypeScript (deployable to **Railway**) for admin role management, CSV import/export, server-side KPI summaries, and scheduled overdue-action sync
+- **`server/`** — Node.js, Express, TypeScript (deployable to **Render** via `render.yaml`) for admin role & user management, department/budget administration, CSV import/export, server-side KPI summaries, and scheduled overdue-action sync
 - **`supabase/migrations/`** — Normalized PostgreSQL schema, Row-Level Security (RLS) policies, Realtime publication, and sample seed data
 
 ## Features
@@ -22,7 +22,7 @@ A full-stack IT Portfolio Governance & Management web application for **Greenspr
    - Manage project-linked Risks and Leadership Actions
 4. **RBAC & Security**
    - Database-enforced RLS (`executive` = read-only, `project_manager` & `admin` = full CRUD)
-   - Admin user role management (`/admin/users`) backed by the Railway Express API
+   - Admin user role management (`/admin/users`) backed by the Render Express API
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ A full-stack IT Portfolio Governance & Management web application for **Greenspr
    UPDATE public.profiles SET role = 'admin' WHERE email = 'your-admin@greenspringsschool.com';
    ```
 
-### 2. Backend API (`server/` — Railway)
+### 2. Backend API (`server/` — Render)
 ```bash
 cd server
 cp .env.example .env
