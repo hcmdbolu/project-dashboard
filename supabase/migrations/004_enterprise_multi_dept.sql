@@ -622,3 +622,12 @@ DROP POLICY IF EXISTS "Only Super Admin deletes department budgets" ON public.de
 CREATE POLICY "Only Super Admin deletes department budgets"
   ON public.department_budgets FOR DELETE TO authenticated
   USING (public.current_user_role() = 'Super Admin');
+
+
+-- 11. Required Schema, Table, Sequence & Function Grants (enforced by RLS above)
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.current_user_department_id() TO authenticated, service_role;
