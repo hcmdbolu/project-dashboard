@@ -281,14 +281,27 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
                   required
                   disabled={Boolean(lockedDepartmentId)}
                   value={form.department_id}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextDeptId = e.target.value;
+                    const currCat = categories.find((c) => c.id === form.category_id);
+                    const keepCat =
+                      currCat &&
+                      (currCat.department_id === null ||
+                        currCat.department_id === nextDeptId);
+                    const fallbackCat =
+                      categories.find(
+                        (c) =>
+                          c.department_id === null || c.department_id === nextDeptId
+                      )?.id ?? null;
+
                     setForm({
                       ...form,
-                      department_id: e.target.value,
+                      department_id: nextDeptId,
+                      category_id: keepCat ? form.category_id : fallbackCat,
                       project_manager_id: null,
                       owner_id: null,
-                    })
-                  }
+                    });
+                  }}
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
                 >
                   {departments.map((d) => (

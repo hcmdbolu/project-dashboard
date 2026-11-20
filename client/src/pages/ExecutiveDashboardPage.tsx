@@ -263,8 +263,8 @@ export const ExecutiveDashboardPage: React.FC = () => {
           {isOrgWide && (
             <section>
               <DepartmentBudgetChart
-                departments={departments}
-                budgets={budgets}
+                departments={activeDepartment ? [activeDepartment] : departments}
+                budgets={visibleBudgets}
                 projects={filteredProjects}
               />
             </section>

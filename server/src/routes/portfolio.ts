@@ -63,7 +63,7 @@ const STATUS_LABEL_MAP: Record<string, string> = {
   Blue: 'Completed',
 };
 
-function escapeCsv(value: string | number | null | undefined): string {
+function escapeCsv(value: unknown): string {
   const str = String(value ?? '');
   if (/[",\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
@@ -78,11 +78,45 @@ router.get('/summary', async (req, res, next) => {
     const supabase = getSupabaseAdmin();
     let projectsQuery = supabase.from('projects').select('*');
     if (req.user?.role === 'Department Admin' || req.user?.role === 'Project Manager') {
-      if (req.user.departmentId) {
-        projectsQuery = projectsQuery.eq('department_id', req.user.departmentId);
+      if (!req.user.departmentId) {
+        res.json({
+          totalProjects: 0,
+          completedProjects: 0,
+          onTrackProjects: 0,
+          attentionProjects: 0,
+          criticalProjects: 0,
+          behindScheduleProjects: 0,
+          avgPercentComplete: 0,
+          totalApprovedBudget: 0,
+          totalActualSpend: 0,
+          remainingBudget: 0,
+          openRisks: 0,
+          openLeadershipActions: 0,
+        });
+        return;
       }
+      projectsQuery = projectsQuery.eq('department_id', req.user.departmentId);
     } else if (req.user?.role === 'Project Owner') {
-      projectsQuery = projectsQuery.eq('owner_id', req.user.id);
+      if (!req.user.departmentId) {
+        res.json({
+          totalProjects: 0,
+          completedProjects: 0,
+          onTrackProjects: 0,
+          attentionProjects: 0,
+          criticalProjects: 0,
+          behindScheduleProjects: 0,
+          avgPercentComplete: 0,
+          totalApprovedBudget: 0,
+          totalActualSpend: 0,
+          remainingBudget: 0,
+          openRisks: 0,
+          openLeadershipActions: 0,
+        });
+        return;
+      }
+      projectsQuery = projectsQuery
+        .eq('department_id', req.user.departmentId)
+        .eq('owner_id', req.user.id);
     }
 
     const [projectsRes, risksRes, actionsRes] = await Promise.all([
@@ -154,16 +188,27 @@ router.get('/export', async (req, res, next) => {
       .select('*')
       .order('priority_score', { ascending: false });
 
-    if (req.user?.role === 'Department Admin' || req.user?.role === 'Project Manager') {
-      if (req.user.departmentId) {
-        query = query.eq('department_id', req.user.departmentId);
-      }
-    } else if (req.user?.role === 'Project Owner') {
-      query = query.eq('owner_id', req.user.id);
-    }
+    let data: Array<Record<string, unknown>> = [];
+    const role = req.user?.role;
+    const isUnassignedScoped =
+      (role === 'Department Admin' ||
+        role === 'Project Manager' ||
+        role === 'Project Owner') &&
+      !req.user?.departmentId;
 
-    const { data, error } = await query;
-    if (error) throw error;
+    if (!isUnassignedScoped) {
+      if (role === 'Department Admin' || role === 'Project Manager') {
+        query = query.eq('department_id', req.user!.departmentId!);
+      } else if (role === 'Project Owner') {
+        query = query
+          .eq('department_id', req.user!.departmentId!)
+          .eq('owner_id', req.user!.id);
+      }
+
+      const resData = await query;
+      if (resData.error) throw resData.error;
+      data = (resData.data ?? []) as Array<Record<string, unknown>>;
+    }
 
     const headers = [
       'Project Code',
@@ -194,7 +239,7 @@ router.get('/export', async (req, res, next) => {
         p.approval_authority,
         p.percent_complete,
         p.schedule_status,
-        STATUS_LABEL_MAP[p.rag_status] ?? p.rag_status,
+        STATUS_LABEL_MAP[String(p.rag_status ?? '')] ?? p.rag_status,
         p.priority_score,
         p.approved_budget,
         p.actual_spend,
@@ -248,10 +293,26 @@ router.post(
           updated_by: req.user?.id,
         };
 
-        if (item.project_code && item.project_code.trim() !== '') {
+        const trimmedCode = item.project_code?.trim() || '';
+        if (trimmedCode !== '') {
+          if (req.user?.role !== 'Super Admin') {
+            const { data: existing } = await supabase
+              .from('projects')
+              .select('id, department_id')
+              .eq('project_code', trimmedCode)
+              .maybeSingle();
+
+            if (existing && existing.department_id !== deptId) {
+              res.status(403).json({
+                error: `Cannot overwrite ${trimmedCode}: belongs to another department.`,
+              });
+              return;
+            }
+          }
+
           const { data, error } = await supabase
             .from('projects')
-            .upsert(row, { onConflict: 'project_code' })
+            .upsert({ ...row, project_code: trimmedCode }, { onConflict: 'project_code' })
             .select('id, project_code')
             .single();
           if (error) throw error;

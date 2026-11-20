@@ -274,14 +274,22 @@ CREATE TRIGGER trg_leadership_actions_updated_at
   BEFORE UPDATE ON public.leadership_actions
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- Auto-generate GSL-PROJECT-001, GSL-PROJECT-002, etc.
+-- Auto-generate GSL-PROJECT-001, GSL-PROJECT-002, etc. (collision-safe loop)
 CREATE OR REPLACE FUNCTION public.generate_gsl_project_code()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  candidate text;
 BEGIN
   IF NEW.project_code IS NULL OR btrim(NEW.project_code) = '' THEN
-    NEW.project_code := 'GSL-PROJECT-' || lpad(nextval('public.gsl_project_code_seq')::text, 3, '0');
+    LOOP
+      candidate := 'GSL-PROJECT-' || lpad(nextval('public.gsl_project_code_seq')::text, 3, '0');
+      EXIT WHEN NOT EXISTS (
+        SELECT 1 FROM public.projects WHERE project_code = candidate
+      );
+    END LOOP;
+    NEW.project_code := candidate;
   END IF;
   RETURN NEW;
 END;
@@ -359,6 +367,18 @@ BEGIN
   IF OLD.target_end_date IS DISTINCT FROM NEW.target_end_date THEN
     INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
     VALUES (NEW.id, actor, 'target_end_date', OLD.target_end_date::text, NEW.target_end_date::text);
+  END IF;
+  IF OLD.department_id IS DISTINCT FROM NEW.department_id THEN
+    INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+    VALUES (NEW.id, actor, 'department_id', OLD.department_id::text, NEW.department_id::text);
+  END IF;
+  IF OLD.category_id IS DISTINCT FROM NEW.category_id THEN
+    INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+    VALUES (NEW.id, actor, 'category_id', OLD.category_id::text, NEW.category_id::text);
+  END IF;
+  IF OLD.next_milestone IS DISTINCT FROM NEW.next_milestone THEN
+    INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+    VALUES (NEW.id, actor, 'next_milestone', OLD.next_milestone, NEW.next_milestone);
   END IF;
 
   RETURN NEW;

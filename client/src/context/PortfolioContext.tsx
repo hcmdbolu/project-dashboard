@@ -492,22 +492,31 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return true;
       }
 
-      const res = await fetch(`${API_BASE_URL}/api/departments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session?.access_token}`,
-        },
-        body: JSON.stringify(input),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        pushToast({ type: 'error', title: 'Create failed', message: data.error });
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/departments`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify(input),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          pushToast({ type: 'error', title: 'Create failed', message: data.error });
+          return false;
+        }
+        setDepartments((curr) => [...curr, data.department]);
+        pushToast({ type: 'success', title: 'Department created' });
+        return true;
+      } catch (err) {
+        pushToast({
+          type: 'error',
+          title: 'Create failed',
+          message: err instanceof Error ? err.message : 'Express API unreachable.',
+        });
         return false;
       }
-      setDepartments((curr) => [...curr, data.department]);
-      pushToast({ type: 'success', title: 'Department created' });
-      return true;
     },
     [isSuperAdmin, pushToast, session?.access_token]
   );
@@ -522,22 +531,31 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         pushToast({ type: 'success', title: 'Department updated' });
         return true;
       }
-      const res = await fetch(`${API_BASE_URL}/api/departments/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session?.access_token}`,
-        },
-        body: JSON.stringify(input),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        pushToast({ type: 'error', title: 'Update failed', message: data.error });
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/departments/${id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify(input),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          pushToast({ type: 'error', title: 'Update failed', message: data.error });
+          return false;
+        }
+        setDepartments((curr) => curr.map((d) => (d.id === id ? data.department : d)));
+        pushToast({ type: 'success', title: 'Department updated' });
+        return true;
+      } catch (err) {
+        pushToast({
+          type: 'error',
+          title: 'Update failed',
+          message: err instanceof Error ? err.message : 'Express API unreachable.',
+        });
         return false;
       }
-      setDepartments((curr) => curr.map((d) => (d.id === id ? data.department : d)));
-      pushToast({ type: 'success', title: 'Department updated' });
-      return true;
     },
     [isSuperAdmin, pushToast, session?.access_token]
   );
@@ -558,18 +576,27 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         pushToast({ type: 'success', title: 'Department deleted' });
         return true;
       }
-      const res = await fetch(`${API_BASE_URL}/api/departments/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        pushToast({ type: 'error', title: 'Delete failed', message: data.error });
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/departments/${id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          pushToast({ type: 'error', title: 'Delete failed', message: data.error });
+          return false;
+        }
+        setDepartments((curr) => curr.filter((d) => d.id !== id));
+        pushToast({ type: 'success', title: 'Department deleted' });
+        return true;
+      } catch (err) {
+        pushToast({
+          type: 'error',
+          title: 'Delete failed',
+          message: err instanceof Error ? err.message : 'Express API unreachable.',
+        });
         return false;
       }
-      setDepartments((curr) => curr.filter((d) => d.id !== id));
-      pushToast({ type: 'success', title: 'Department deleted' });
-      return true;
     },
     [isSuperAdmin, pushToast, rawProjects, session?.access_token]
   );
@@ -843,12 +870,25 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             };
           })
         );
-        if (input.approved_budget !== undefined) {
-          recordDemoAudit(id, 'approved_budget', target.approved_budget, input.approved_budget);
-        }
-        if (input.actual_spend !== undefined) {
-          recordDemoAudit(id, 'actual_spend', target.actual_spend, input.actual_spend);
-        }
+        const trackedFields: Array<keyof ProjectInput> = [
+          'name',
+          'rag_status',
+          'schedule_status',
+          'percent_complete',
+          'approved_budget',
+          'actual_spend',
+          'owner_id',
+          'project_manager_id',
+          'target_end_date',
+          'department_id',
+          'category_id',
+          'next_milestone',
+        ];
+        trackedFields.forEach((field) => {
+          if (input[field] !== undefined) {
+            recordDemoAudit(id, field, target[field], input[field]);
+          }
+        });
         pushToast({ type: 'success', title: 'Project saved' });
         return true;
       }

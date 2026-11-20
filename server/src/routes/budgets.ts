@@ -114,9 +114,13 @@ router.patch(
         })
         .eq('id', req.params.id)
         .select('*')
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) {
+        res.status(404).json({ error: 'Budget proposal not found.' });
+        return;
+      }
       res.json({ budget: data });
     } catch (err) {
       next(err);
