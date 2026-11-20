@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { getSupabaseAdmin, getSupabaseAuthClient } from '../lib/supabaseAdmin';
+import { getSupabaseAdmin, getSupabaseAuthClient } from '../lib/supabaseAdmin.js';
 
 export type AppRole =
   | 'Super Admin'

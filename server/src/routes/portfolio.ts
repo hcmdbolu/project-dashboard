@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { syncOverdueLeadershipActions } from '../jobs/overdueActions';
-import { getSupabaseAdmin } from '../lib/supabaseAdmin';
-import { authenticate, requireRole } from '../middleware/auth';
+import { syncOverdueLeadershipActions } from '../jobs/overdueActions.js';
+import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 

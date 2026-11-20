@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { getSupabaseAdmin } from '../lib/supabaseAdmin';
-import { authenticate, requireRole } from '../middleware/auth';
+import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 

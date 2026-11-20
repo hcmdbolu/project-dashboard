@@ -34,7 +34,7 @@ Follow these steps in order to deploy the **GSL Enterprise Portfolio Management 
 2. Deploy using the included **`render.yaml`** Blueprint *(recommended)*:
    - Click **New + -> Blueprint**.
    - Select your `project-dashboard` GitHub repository and branch `main`.
-   - Render reads `render.yaml` automatically (`rootDir: server`, `buildCommand: npm install && npm run build`, `startCommand: npm start`, `healthCheckPath: /api/health`).
+   - Render reads `render.yaml` automatically (`rootDir: server`, `buildCommand: npm install --include=dev && npm run build`, `startCommand: npm start`, `healthCheckPath: /api/health`).
 3. When prompted for environment variables *(or under **Service -> Environment**)*, fill in:
    | Variable | Value |
    | :--- | :--- |

@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getSupabaseAdmin } from '../lib/supabaseAdmin';
+import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
 
 export async function syncOverdueLeadershipActions(): Promise<number> {
   const supabase = getSupabaseAdmin();

@@ -2,12 +2,12 @@ import 'dotenv/config';
 import cors from 'cors';
 import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
-import { startOverdueActionsCron } from './jobs/overdueActions';
-import adminRouter from './routes/admin';
-import budgetsRouter from './routes/budgets';
-import departmentsRouter from './routes/departments';
-import healthRouter from './routes/health';
-import portfolioRouter from './routes/portfolio';
+import { startOverdueActionsCron } from './jobs/overdueActions.js';
+import adminRouter from './routes/admin.js';
+import budgetsRouter from './routes/budgets.js';
+import departmentsRouter from './routes/departments.js';
+import healthRouter from './routes/health.js';
+import portfolioRouter from './routes/portfolio.js';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
