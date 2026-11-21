@@ -32,6 +32,7 @@ interface ProjectFormModalProps {
   allProjects: Project[];
   lockedDepartmentId: string | null;
   canAddCategory: boolean;
+  canManageOwnership?: boolean;
   onCreateCategory: (
     name: string,
     departmentId: string | null
@@ -50,6 +51,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
   allProjects,
   lockedDepartmentId,
   canAddCategory,
+  canManageOwnership = true,
   onCreateCategory,
   onClose,
   onSubmit,
@@ -64,6 +66,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
     campus: 'All Campuses',
     project_manager_id: null,
     owner_id: null,
+    owner_ids: [],
+    owner_department_ids: [],
     technical_lead_name: '',
     approval_authority: '',
     problem_solved: '',
@@ -85,6 +89,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
   });
 
   const [form, setForm] = useState<ProjectInput>(buildEmpty);
+  const [ownerSearch, setOwnerSearch] = useState('');
   const [addingCat, setAddingCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -94,14 +99,23 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
     setValidationError(null);
     setAddingCat(false);
     setNewCatName('');
+    setOwnerSearch('');
     if (initialProject) {
+      const initOwners =
+        initialProject.owner_ids && initialProject.owner_ids.length > 0
+          ? initialProject.owner_ids
+          : initialProject.owner_id
+          ? [initialProject.owner_id]
+          : [];
       setForm({
         department_id: initialProject.department_id,
         category_id: initialProject.category_id,
         name: initialProject.name,
         campus: initialProject.campus,
         project_manager_id: initialProject.project_manager_id ?? null,
-        owner_id: initialProject.owner_id ?? null,
+        owner_id: initOwners[0] ?? null,
+        owner_ids: initOwners,
+        owner_department_ids: initialProject.owner_department_ids ?? [],
         technical_lead_name: initialProject.technical_lead_name,
         approval_authority: initialProject.approval_authority,
         problem_solved: initialProject.problem_solved,
@@ -128,24 +142,43 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProject, open]);
 
-  // Eligible Project Managers & Project Owners within the selected department
+  // Eligible Project Managers: Primary department PM/Dept Admin + all Super Admins
   const eligiblePms = useMemo(() => {
     return profiles.filter(
       (u) =>
-        u.department_id === form.department_id &&
-        (u.role === 'Project Manager' || u.role === 'Department Admin')
+        u.role === 'Super Admin' ||
+        (u.department_id === form.department_id &&
+          (u.role === 'Project Manager' || u.role === 'Department Admin'))
     );
   }, [form.department_id, profiles]);
 
+  // Eligible Individual Co-Owners: Primary dept + tagged Department Owners + all Super Admins
   const eligibleOwners = useMemo(() => {
+    const allowedDeptIds = new Set<string>([
+      form.department_id,
+      ...(form.owner_department_ids ?? []),
+    ]);
     return profiles.filter(
       (u) =>
-        u.department_id === form.department_id &&
-        (u.role === 'Project Owner' ||
-          u.role === 'Project Manager' ||
-          u.role === 'Department Admin')
+        u.role === 'Super Admin' ||
+        (Boolean(u.department_id) &&
+          allowedDeptIds.has(u.department_id!) &&
+          (u.role === 'Project Owner' ||
+            u.role === 'Project Manager' ||
+            u.role === 'Department Admin'))
     );
-  }, [form.department_id, profiles]);
+  }, [form.department_id, form.owner_department_ids, profiles]);
+
+  const filteredEligibleOwners = useMemo(() => {
+    const q = ownerSearch.trim().toLowerCase();
+    if (!q) return eligibleOwners;
+    return eligibleOwners.filter(
+      (u) =>
+        u.full_name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.role.toLowerCase().includes(q)
+    );
+  }, [eligibleOwners, ownerSearch]);
 
   const availableCategories = useMemo(() => {
     return categories.filter(
@@ -218,6 +251,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
     setSubmitting(true);
     const ok = await onSubmit({
       ...form,
+      owner_id: form.owner_ids[0] ?? null,
       percent_complete: Math.max(0, Math.min(100, Math.round(form.percent_complete))),
     });
     setSubmitting(false);
@@ -279,7 +313,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
                 </label>
                 <select
                   required
-                  disabled={Boolean(lockedDepartmentId)}
+                  disabled={Boolean(lockedDepartmentId) || !canManageOwnership}
                   value={form.department_id}
                   onChange={(e) => {
                     const nextDeptId = e.target.value;
@@ -294,12 +328,34 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
                           c.department_id === null || c.department_id === nextDeptId
                       )?.id ?? null;
 
+                    const selectedPm = profiles.find(
+                      (u) => u.id === form.project_manager_id
+                    );
+                    const keepPm =
+                      selectedPm &&
+                      (selectedPm.role === 'Super Admin' ||
+                        selectedPm.department_id === nextDeptId);
+
+                    const nextAllowedDepts = new Set<string>([
+                      nextDeptId,
+                      ...(form.owner_department_ids ?? []),
+                    ]);
+                    const nextOwnerIds = form.owner_ids.filter((uid) => {
+                      const u = profiles.find((p) => p.id === uid);
+                      return (
+                        u &&
+                        (u.role === 'Super Admin' ||
+                          (u.department_id && nextAllowedDepts.has(u.department_id)))
+                      );
+                    });
+
                     setForm({
                       ...form,
                       department_id: nextDeptId,
                       category_id: keepCat ? form.category_id : fallbackCat,
-                      project_manager_id: null,
-                      owner_id: null,
+                      project_manager_id: keepPm ? form.project_manager_id : null,
+                      owner_ids: nextOwnerIds,
+                      owner_id: nextOwnerIds[0] ?? null,
                     });
                   }}
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
@@ -494,9 +550,16 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
           </section>
 
           <section className="space-y-3 border-t border-slate-100 pt-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gsl-700">
-              2. Ownership &amp; Accountability (Department Roster)
-            </h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gsl-700">
+                2. Ownership &amp; Accountability
+              </h4>
+              {!canManageOwnership && (
+                <span className="text-[11px] font-medium text-slate-500">
+                  Co-owner &amp; department ownership assignments are managed by Admins/PMs
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
@@ -520,26 +583,6 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
-                  Project Owner
-                </label>
-                <select
-                  value={form.owner_id ?? ''}
-                  onChange={(e) =>
-                    setForm({ ...form, owner_id: e.target.value || null })
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-gsl-600 focus:outline-none"
-                >
-                  <option value="">Select Project Owner...</option>
-                  {eligibleOwners.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.full_name} ({u.role})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">
                   Technical Lead
                 </label>
                 <input
@@ -553,7 +596,7 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700">
                   Approval Authority
                 </label>
@@ -566,6 +609,179 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({
                   }
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-gsl-600 focus:outline-none"
                 />
+              </div>
+
+              {/* Multiple Individual Co-Owners (View & Edit) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-slate-800">
+                    Individual Co-Owners (View &amp; Edit)
+                  </label>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                    {form.owner_ids.length} selected
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Includes primary dept, tagged departments, and Super Admins across all depts.
+                </p>
+
+                {form.owner_ids.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {form.owner_ids.map((uid) => {
+                      const user = profiles.find((p) => p.id === uid);
+                      return (
+                        <span
+                          key={uid}
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-800 ring-1 ring-inset ring-blue-200"
+                        >
+                          {user?.full_name || uid}
+                          {canManageOwnership && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = form.owner_ids.filter((id) => id !== uid);
+                                setForm({
+                                  ...form,
+                                  owner_ids: next,
+                                  owner_id: next[0] ?? null,
+                                });
+                              }}
+                              className="rounded-full p-0.5 hover:bg-blue-200/70"
+                              aria-label={`Remove ${user?.full_name || 'owner'}`}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  disabled={!canManageOwnership}
+                  value={ownerSearch}
+                  onChange={(e) => setOwnerSearch(e.target.value)}
+                  placeholder="Search co-owners by name, email, or role..."
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs focus:border-gsl-600 focus:outline-none disabled:bg-slate-100"
+                />
+
+                <div className="mt-2 max-h-36 space-y-1 overflow-y-auto pr-1">
+                  {filteredEligibleOwners.length === 0 ? (
+                    <p className="py-2 text-center text-[11px] text-slate-400">
+                      No matching users found.
+                    </p>
+                  ) : (
+                    filteredEligibleOwners.map((u) => {
+                      const checked = form.owner_ids.includes(u.id);
+                      const deptName =
+                        departments.find((d) => d.id === u.department_id)?.code ?? 'ALL';
+                      return (
+                        <label
+                          key={u.id}
+                          className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs ${
+                            canManageOwnership
+                              ? 'cursor-pointer hover:bg-white'
+                              : 'cursor-not-allowed opacity-70'
+                          } ${checked ? 'bg-white ring-1 ring-blue-200' : ''}`}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <input
+                              type="checkbox"
+                              disabled={!canManageOwnership}
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...form.owner_ids, u.id]
+                                  : form.owner_ids.filter((id) => id !== u.id);
+                                setForm({
+                                  ...form,
+                                  owner_ids: next,
+                                  owner_id: next[0] ?? null,
+                                });
+                              }}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-gsl-700 focus:ring-gsl-600"
+                            />
+                            <span className="truncate font-medium text-slate-800">
+                              {u.full_name}
+                            </span>
+                          </span>
+                          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {u.role === 'Super Admin' ? 'Super Admin' : `${deptName} • ${u.role}`}
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Department Owners (Department-Wide View Access) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-slate-800">
+                    Department Owners (View Access)
+                  </label>
+                  <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-800">
+                    {form.owner_department_ids.length} selected
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Everyone in selected department(s) can view this project and pick co-owners from them.
+                </p>
+
+                <div className="mt-2.5 space-y-1.5">
+                  {departments.map((d) => {
+                    const checked = form.owner_department_ids.includes(d.id);
+                    return (
+                      <label
+                        key={d.id}
+                        className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
+                          canManageOwnership
+                            ? 'cursor-pointer hover:bg-white'
+                            : 'cursor-not-allowed opacity-70'
+                        } ${checked ? 'bg-white ring-1 ring-teal-200' : ''}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            disabled={!canManageOwnership}
+                            checked={checked}
+                            onChange={(e) => {
+                              const nextDepts = e.target.checked
+                                ? [...form.owner_department_ids, d.id]
+                                : form.owner_department_ids.filter((id) => id !== d.id);
+                              const nextAllowedDepts = new Set<string>([
+                                form.department_id,
+                                ...nextDepts,
+                              ]);
+                              const nextOwners = form.owner_ids.filter((uid) => {
+                                const u = profiles.find((p) => p.id === uid);
+                                return (
+                                  u &&
+                                  (u.role === 'Super Admin' ||
+                                    (u.department_id && nextAllowedDepts.has(u.department_id)))
+                                );
+                              });
+                              setForm({
+                                ...form,
+                                owner_department_ids: nextDepts,
+                                owner_ids: nextOwners,
+                                owner_id: nextOwners[0] ?? null,
+                              });
+                            }}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-gsl-700 focus:ring-gsl-600"
+                          />
+                          <span className="font-medium text-slate-800">{d.name}</span>
+                        </span>
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600">
+                          {d.code}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </section>

@@ -37,6 +37,7 @@ interface PortfolioTableProps {
   canDeleteRow: (project: Project) => boolean;
   getDepartmentName: (deptId: string | null | undefined) => string;
   currentUserId?: string;
+  currentUserDepartmentId?: string | null;
   onInlineUpdate: (
     id: string,
     patch: Partial<Pick<Project, 'percent_complete' | 'rag_status' | 'schedule_status'>>
@@ -52,6 +53,7 @@ export const PortfolioTable: React.FC<PortfolioTableProps> = ({
   canDeleteRow,
   getDepartmentName,
   currentUserId,
+  currentUserDepartmentId,
   onInlineUpdate,
   onOpenDrawer,
   onEditProject,
@@ -144,7 +146,15 @@ export const PortfolioTable: React.FC<PortfolioTableProps> = ({
                 const editable = canEditRow(project);
                 const deletable = canDeleteRow(project);
                 const isOwnProject =
-                  Boolean(currentUserId) && project.owner_id === currentUserId;
+                  Boolean(currentUserId) &&
+                  (project.owner_ids?.includes(currentUserId!) ||
+                    project.owner_id === currentUserId);
+                const isDeptShared =
+                  Boolean(currentUserDepartmentId) &&
+                  project.owner_department_ids?.includes(currentUserDepartmentId!) &&
+                  project.department_id !== currentUserDepartmentId;
+                const ownerNames = project.owner_names ?? [];
+                const deptOwnerNames = project.owner_department_names ?? [];
                 const remaining = project.approved_budget - project.actual_spend;
                 const overBudget = remaining < 0;
                 const behindSchedule = isProjectBehindSchedule(project);
@@ -163,6 +173,11 @@ export const PortfolioTable: React.FC<PortfolioTableProps> = ({
                         {isOwnProject && (
                           <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                             Assigned to You
+                          </span>
+                        )}
+                        {!isOwnProject && isDeptShared && (
+                          <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
+                            Dept Shared
                           </span>
                         )}
                         {behindSchedule && (
@@ -195,11 +210,47 @@ export const PortfolioTable: React.FC<PortfolioTableProps> = ({
                       </div>
                     </td>
 
-                    <td className="min-w-[185px] px-4 py-3.5 align-top text-xs">
-                      <p className="font-semibold text-slate-800">
-                        Owner: {project.owner_name}
-                      </p>
-                      <p className="text-slate-600">PM: {project.project_manager_name}</p>
+                    <td className="min-w-[205px] px-4 py-3.5 align-top text-xs">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {ownerNames.length > 0 ? (
+                          <>
+                            {ownerNames.slice(0, 2).map((name, idx) => (
+                              <span
+                                key={`${project.id}-owner-${idx}`}
+                                className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-800 ring-1 ring-inset ring-blue-200"
+                              >
+                                {name}
+                              </span>
+                            ))}
+                            {ownerNames.length > 2 && (
+                              <span
+                                title={ownerNames.slice(2).join(', ')}
+                                className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600"
+                              >
+                                +{ownerNames.length - 2} more
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="font-semibold text-slate-500">
+                            Owner: Unassigned
+                          </span>
+                        )}
+                      </div>
+                      {deptOwnerNames.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {deptOwnerNames.map((deptName, idx) => (
+                            <span
+                              key={`${project.id}-dept-owner-${idx}`}
+                              title="Department-wide view access"
+                              className="inline-flex items-center rounded-md bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800 ring-1 ring-inset ring-teal-200"
+                            >
+                              Dept: {deptName}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <p className="mt-1 text-slate-600">PM: {project.project_manager_name}</p>
                       <p className="truncate text-[11px] text-slate-500">
                         Tech: {project.technical_lead_name}
                       </p>

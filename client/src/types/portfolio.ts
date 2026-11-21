@@ -78,6 +78,18 @@ export interface DepartmentBudget {
   updated_at?: string;
 }
 
+export interface ProjectOwnerEntry {
+  project_id: string;
+  user_id: string;
+  created_at?: string;
+}
+
+export interface ProjectDepartmentOwnerEntry {
+  project_id: string;
+  department_id: string;
+  created_at?: string;
+}
+
 export interface Project {
   id: string;
   project_code: string;
@@ -91,8 +103,12 @@ export interface Project {
   // Ownership & Accountability
   project_manager_id?: string | null;
   owner_id?: string | null;
+  owner_ids: string[];
+  owner_department_ids: string[];
   project_manager_name?: string;
   owner_name?: string;
+  owner_names?: string[];
+  owner_department_names?: string[];
   technical_lead_name: string;
   approval_authority: string;
 
@@ -133,6 +149,8 @@ export type ProjectInput = Omit<
   | 'category'
   | 'project_manager_name'
   | 'owner_name'
+  | 'owner_names'
+  | 'owner_department_names'
   | 'created_at'
   | 'updated_at'
 > & {

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { DEMO_USERS } from '../data/demoData';
+import { isProjectAssignedToOwner } from '../lib/formatters';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { AppRole, Profile, Project } from '../types/portfolio';
 
@@ -14,12 +15,15 @@ interface AuthContextValue {
   isDepartmentAdmin: boolean;
   isOrgWide: boolean;
   canCreateProject: boolean;
+  canManageOwnership: boolean;
   canManageUsers: boolean;
   canManageDepartments: boolean;
   canViewBudgets: boolean;
   canProposeBudgets: boolean;
   canApproveBudgets: boolean;
-  canEditProject: (project: Pick<Project, 'department_id' | 'owner_id'>) => boolean;
+  canEditProject: (
+    project: Pick<Project, 'department_id' | 'owner_id'> & { owner_ids?: string[] }
+  ) => boolean;
   canDeleteProject: (project: Pick<Project, 'department_id'>) => boolean;
   loading: boolean;
   isDemoMode: boolean;
@@ -168,6 +172,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const canCreateProject =
     isSuperAdmin || isDepartmentAdmin || role === 'Project Manager';
+  const canManageOwnership = canCreateProject;
   const canManageUsers = isSuperAdmin || isDepartmentAdmin;
   const canManageDepartments = isSuperAdmin;
   const canViewBudgets = isSuperAdmin || isExecutive || isDepartmentAdmin;
@@ -175,17 +180,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canApproveBudgets = isSuperAdmin;
 
   const canEditProject = useCallback(
-    (project: Pick<Project, 'department_id' | 'owner_id'>): boolean => {
+    (
+      project: Pick<Project, 'department_id' | 'owner_id'> & { owner_ids?: string[] }
+    ): boolean => {
       if (isSuperAdmin) return true;
       if (isExecutive) return false;
-      if (!departmentId || project.department_id !== departmentId) return false;
-      if (isDepartmentAdmin || role === 'Project Manager') return true;
-      if (role === 'Project Owner' && profile?.id && project.owner_id === profile.id) {
+      if (
+        (isDepartmentAdmin || role === 'Project Manager') &&
+        departmentId &&
+        project.department_id === departmentId
+      ) {
+        return true;
+      }
+      if (isProjectAssignedToOwner(project, profile)) {
         return true;
       }
       return false;
     },
-    [departmentId, isDepartmentAdmin, isExecutive, isSuperAdmin, profile?.id, role]
+    [departmentId, isDepartmentAdmin, isExecutive, isSuperAdmin, profile, role]
   );
 
   const canDeleteProject = useCallback(
@@ -211,6 +223,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isDepartmentAdmin,
         isOrgWide,
         canCreateProject,
+        canManageOwnership,
         canManageUsers,
         canManageDepartments,
         canViewBudgets,

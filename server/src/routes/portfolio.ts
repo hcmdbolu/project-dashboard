@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { syncOverdueLeadershipActions } from '../jobs/overdueActions.js';
 import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { AuthenticatedUser, authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -17,6 +17,8 @@ const bulkImportSchema = z.object({
         campus: z.enum(['Lekki', 'Ikoyi', 'Anthos', 'Anthony', 'All Campuses']),
         project_manager_id: z.string().uuid().nullable().optional(),
         owner_id: z.string().uuid().nullable().optional(),
+        owner_ids: z.array(z.string().uuid()).optional(),
+        owner_department_ids: z.array(z.string().uuid()).optional(),
         technical_lead_name: z.string().default(''),
         approval_authority: z.string().default(''),
         problem_solved: z.string().default(''),
@@ -71,66 +73,85 @@ function escapeCsv(value: unknown): string {
   return str;
 }
 
+async function fetchVisibleProjectsForUser(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  user: AuthenticatedUser
+): Promise<Array<Record<string, unknown>>> {
+  if (user.role === 'Super Admin' || user.role === 'Executive') {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .order('priority_score', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Array<Record<string, unknown>>;
+  }
+
+  const [coOwnerRes, deptOwnerRes] = await Promise.all([
+    supabase.from('project_owners').select('project_id').eq('user_id', user.id),
+    user.departmentId
+      ? supabase
+          .from('project_department_owners')
+          .select('project_id')
+          .eq('department_id', user.departmentId)
+      : Promise.resolve({ data: [] as Array<{ project_id: string }>, error: null }),
+  ]);
+
+  if (coOwnerRes.error) throw coOwnerRes.error;
+  if (deptOwnerRes.error) throw deptOwnerRes.error;
+
+  const extraIds = Array.from(
+    new Set([
+      ...(coOwnerRes.data ?? []).map((r) => String(r.project_id)),
+      ...(deptOwnerRes.data ?? []).map((r) => String(r.project_id)),
+    ])
+  );
+
+  let query = supabase
+    .from('projects')
+    .select('*')
+    .order('priority_score', { ascending: false });
+
+  if (user.role === 'Department Admin' || user.role === 'Project Manager') {
+    if (user.departmentId && extraIds.length > 0) {
+      query = query.or(
+        `department_id.eq.${user.departmentId},id.in.(${extraIds.join(',')})`
+      );
+    } else if (user.departmentId) {
+      query = query.eq('department_id', user.departmentId);
+    } else if (extraIds.length > 0) {
+      query = query.in('id', extraIds);
+    } else {
+      return [];
+    }
+  } else if (user.role === 'Project Owner') {
+    if (extraIds.length > 0) {
+      query = query.or(`id.in.(${extraIds.join(',')}),owner_id.eq.${user.id}`);
+    } else {
+      query = query.eq('owner_id', user.id);
+    }
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
 router.use(authenticate);
 
 router.get('/summary', async (req, res, next) => {
   try {
     const supabase = getSupabaseAdmin();
-    let projectsQuery = supabase.from('projects').select('*');
-    if (req.user?.role === 'Department Admin' || req.user?.role === 'Project Manager') {
-      if (!req.user.departmentId) {
-        res.json({
-          totalProjects: 0,
-          completedProjects: 0,
-          onTrackProjects: 0,
-          attentionProjects: 0,
-          criticalProjects: 0,
-          behindScheduleProjects: 0,
-          avgPercentComplete: 0,
-          totalApprovedBudget: 0,
-          totalActualSpend: 0,
-          remainingBudget: 0,
-          openRisks: 0,
-          openLeadershipActions: 0,
-        });
-        return;
-      }
-      projectsQuery = projectsQuery.eq('department_id', req.user.departmentId);
-    } else if (req.user?.role === 'Project Owner') {
-      if (!req.user.departmentId) {
-        res.json({
-          totalProjects: 0,
-          completedProjects: 0,
-          onTrackProjects: 0,
-          attentionProjects: 0,
-          criticalProjects: 0,
-          behindScheduleProjects: 0,
-          avgPercentComplete: 0,
-          totalApprovedBudget: 0,
-          totalActualSpend: 0,
-          remainingBudget: 0,
-          openRisks: 0,
-          openLeadershipActions: 0,
-        });
-        return;
-      }
-      projectsQuery = projectsQuery
-        .eq('department_id', req.user.departmentId)
-        .eq('owner_id', req.user.id);
-    }
+    const projects = await fetchVisibleProjectsForUser(supabase, req.user!);
 
-    const [projectsRes, risksRes, actionsRes] = await Promise.all([
-      projectsQuery,
+    const [risksRes, actionsRes] = await Promise.all([
       supabase.from('risks').select('*'),
       supabase.from('leadership_actions').select('*'),
     ]);
 
-    if (projectsRes.error) throw projectsRes.error;
     if (risksRes.error) throw risksRes.error;
     if (actionsRes.error) throw actionsRes.error;
 
-    const projects = projectsRes.data ?? [];
-    const projectIds = new Set(projects.map((p) => p.id));
+    const projectIds = new Set(projects.map((p) => String(p.id)));
     const risks = (risksRes.data ?? []).filter((r) => projectIds.has(r.project_id));
     const actions = (actionsRes.data ?? []).filter((a) => projectIds.has(a.project_id));
 
@@ -183,37 +204,59 @@ router.get('/summary', async (req, res, next) => {
 router.get('/export', async (req, res, next) => {
   try {
     const supabase = getSupabaseAdmin();
-    let query = supabase
-      .from('projects')
-      .select('*')
-      .order('priority_score', { ascending: false });
+    const data = await fetchVisibleProjectsForUser(supabase, req.user!);
+    const projectIds = data.map((p) => String(p.id));
 
-    let data: Array<Record<string, unknown>> = [];
-    const role = req.user?.role;
-    const isUnassignedScoped =
-      (role === 'Department Admin' ||
-        role === 'Project Manager' ||
-        role === 'Project Owner') &&
-      !req.user?.departmentId;
+    const [coOwnersRes, deptOwnersRes, profilesRes, deptsRes] = await Promise.all([
+      projectIds.length > 0
+        ? supabase.from('project_owners').select('project_id, user_id').in('project_id', projectIds)
+        : Promise.resolve({ data: [] as Array<{ project_id: string; user_id: string }>, error: null }),
+      projectIds.length > 0
+        ? supabase
+            .from('project_department_owners')
+            .select('project_id, department_id')
+            .in('project_id', projectIds)
+        : Promise.resolve({ data: [] as Array<{ project_id: string; department_id: string }>, error: null }),
+      supabase.from('profiles').select('id, full_name'),
+      supabase.from('departments').select('id, name'),
+    ]);
 
-    if (!isUnassignedScoped) {
-      if (role === 'Department Admin' || role === 'Project Manager') {
-        query = query.eq('department_id', req.user!.departmentId!);
-      } else if (role === 'Project Owner') {
-        query = query
-          .eq('department_id', req.user!.departmentId!)
-          .eq('owner_id', req.user!.id);
+    if (coOwnersRes.error) throw coOwnersRes.error;
+    if (deptOwnersRes.error) throw deptOwnersRes.error;
+    if (profilesRes.error) throw profilesRes.error;
+    if (deptsRes.error) throw deptsRes.error;
+
+    const profileMap = new Map(
+      (profilesRes.data ?? []).map((u) => [String(u.id), String(u.full_name || '')])
+    );
+    const deptMap = new Map(
+      (deptsRes.data ?? []).map((d) => [String(d.id), String(d.name || '')])
+    );
+
+    const coOwnersByProj = new Map<string, string[]>();
+    (coOwnersRes.data ?? []).forEach((row) => {
+      const pid = String(row.project_id);
+      const label = profileMap.get(String(row.user_id));
+      if (label) {
+        coOwnersByProj.set(pid, [...(coOwnersByProj.get(pid) ?? []), label]);
       }
+    });
 
-      const resData = await query;
-      if (resData.error) throw resData.error;
-      data = (resData.data ?? []) as Array<Record<string, unknown>>;
-    }
+    const deptOwnersByProj = new Map<string, string[]>();
+    (deptOwnersRes.data ?? []).forEach((row) => {
+      const pid = String(row.project_id);
+      const label = deptMap.get(String(row.department_id));
+      if (label) {
+        deptOwnersByProj.set(pid, [...(deptOwnersByProj.get(pid) ?? []), label]);
+      }
+    });
 
     const headers = [
       'Project Code',
       'Project Name',
       'Campus',
+      'Project Owners',
+      'Department Owners',
       'Technical Lead',
       'Approval Authority',
       '% Complete',
@@ -230,11 +273,16 @@ router.get('/export', async (req, res, next) => {
       'Expected Benefit',
     ];
 
-    const rows = (data ?? []).map((p) =>
-      [
+    const rows = data.map((p) => {
+      const pid = String(p.id);
+      const owners = coOwnersByProj.get(pid)?.join('; ') || '';
+      const deptOwners = deptOwnersByProj.get(pid)?.join('; ') || '';
+      return [
         p.project_code,
         p.name,
         p.campus,
+        owners,
+        deptOwners,
         p.technical_lead_name,
         p.approval_authority,
         p.percent_complete,
@@ -251,8 +299,8 @@ router.get('/export', async (req, res, next) => {
         p.expected_benefit,
       ]
         .map(escapeCsv)
-        .join(',')
-    );
+        .join(',');
+    });
 
     const csv = [headers.join(','), ...rows].join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -287,12 +335,18 @@ router.post(
 
         if (!deptId) continue;
 
+        const { owner_ids, owner_department_ids, ...restItem } = item;
+        const primaryOwnerId =
+          owner_ids && owner_ids.length > 0 ? owner_ids[0] : (restItem.owner_id ?? null);
+
         const row = {
-          ...item,
+          ...restItem,
+          owner_id: primaryOwnerId,
           department_id: deptId,
           updated_by: req.user?.id,
         };
 
+        let savedProject: { id: string; project_code: string } | null = null;
         const trimmedCode = item.project_code?.trim() || '';
         if (trimmedCode !== '') {
           if (req.user?.role !== 'Super Admin') {
@@ -316,7 +370,7 @@ router.post(
             .select('id, project_code')
             .single();
           if (error) throw error;
-          if (data) results.push(data);
+          if (data) savedProject = data;
         } else {
           const { project_code: _omit, ...insertRow } = row;
           const { data, error } = await supabase
@@ -325,7 +379,41 @@ router.post(
             .select('id, project_code')
             .single();
           if (error) throw error;
-          if (data) results.push(data);
+          if (data) savedProject = data;
+        }
+
+        if (savedProject) {
+          results.push(savedProject);
+          const resolvedOwnerIds =
+            owner_ids ?? (primaryOwnerId ? [primaryOwnerId] : []);
+          if (owner_ids !== undefined || primaryOwnerId) {
+            await supabase
+              .from('project_owners')
+              .delete()
+              .eq('project_id', savedProject.id);
+            if (resolvedOwnerIds.length > 0) {
+              await supabase.from('project_owners').insert(
+                Array.from(new Set(resolvedOwnerIds)).map((uid) => ({
+                  project_id: savedProject!.id,
+                  user_id: uid,
+                }))
+              );
+            }
+          }
+          if (owner_department_ids !== undefined) {
+            await supabase
+              .from('project_department_owners')
+              .delete()
+              .eq('project_id', savedProject.id);
+            if (owner_department_ids.length > 0) {
+              await supabase.from('project_department_owners').insert(
+                Array.from(new Set(owner_department_ids)).map((did) => ({
+                  project_id: savedProject!.id,
+                  department_id: did,
+                }))
+              );
+            }
+          }
         }
       }
 

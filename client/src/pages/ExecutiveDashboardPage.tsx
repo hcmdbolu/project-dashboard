@@ -225,7 +225,7 @@ export const ExecutiveDashboardPage: React.FC = () => {
             <span>
               <strong>Project Owner Scope:</strong> All portfolio views are filtered to
               the <strong>{filteredProjects.length}</strong> project(s) assigned to{' '}
-              <strong>{profile?.full_name}</strong>.
+              <strong>{profile?.full_name}</strong> or shared with your department.
             </span>
           </div>
           <Link to="/projects" className="font-semibold text-blue-700 hover:underline">
@@ -310,6 +310,7 @@ export const ExecutiveDashboardPage: React.FC = () => {
               canDeleteRow={canDeleteProject}
               getDepartmentName={getDepartmentName}
               currentUserId={profile?.id}
+              currentUserDepartmentId={profile?.department_id}
               onInlineUpdate={updateProjectInline}
             />
           </section>

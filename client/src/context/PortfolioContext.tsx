@@ -19,6 +19,7 @@ import {
 import {
   computePortfolioKpis,
   computePriorityScore,
+  isProjectAssignedToDepartment,
   isProjectAssignedToOwner,
 } from '../lib/formatters';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
@@ -34,7 +35,9 @@ import {
   PortfolioKpis,
   Profile,
   Project,
+  ProjectDepartmentOwnerEntry,
   ProjectInput,
+  ProjectOwnerEntry,
   Risk,
   RiskInput,
   ToastMessage,
@@ -110,6 +113,7 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     isOrgWide,
     isSuperAdmin,
     canCreateProject,
+    canManageOwnership,
     canProposeBudgets,
     canApproveBudgets,
     canEditProject,
@@ -131,6 +135,25 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
   const [rawProjects, setRawProjects] = useState<Project[]>(
     isSupabaseConfigured ? [] : DEMO_PROJECTS
+  );
+  const [projectOwners, setProjectOwners] = useState<ProjectOwnerEntry[]>(() =>
+    isSupabaseConfigured
+      ? []
+      : DEMO_PROJECTS.flatMap((p) =>
+          (p.owner_ids ?? []).map((user_id) => ({ project_id: p.id, user_id }))
+        )
+  );
+  const [projectDepartmentOwners, setProjectDepartmentOwners] = useState<
+    ProjectDepartmentOwnerEntry[]
+  >(() =>
+    isSupabaseConfigured
+      ? []
+      : DEMO_PROJECTS.flatMap((p) =>
+          (p.owner_department_ids ?? []).map((department_id) => ({
+            project_id: p.id,
+            department_id,
+          }))
+        )
   );
   const [rawRisks, setRawRisks] = useState<Risk[]>(
     isSupabaseConfigured ? [] : DEMO_RISKS
@@ -193,6 +216,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setProfiles([]);
       setBudgets([]);
       setRawProjects([]);
+      setProjectOwners([]);
+      setProjectDepartmentOwners([]);
       setRawRisks([]);
       setRawActions([]);
       setAuditLogs([]);
@@ -201,33 +226,47 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     setLoading(true);
-    const [deptRes, catRes, profRes, budRes, projRes, riskRes, actionRes, auditRes] =
-      await Promise.all([
-        supabase.from('departments').select('*').order('name', { ascending: true }),
-        supabase.from('categories').select('*').order('name', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('id, full_name, email, role, department_id, campus')
-          .order('full_name', { ascending: true }),
-        supabase
-          .from('department_budgets')
-          .select('*')
-          .order('updated_at', { ascending: false }),
-        supabase
-          .from('projects')
-          .select('*')
-          .order('priority_score', { ascending: false }),
-        supabase.from('risks').select('*').order('created_at', { ascending: false }),
-        supabase
-          .from('leadership_actions')
-          .select('*')
-          .order('due_date', { ascending: true }),
-        supabase
-          .from('audit_logs')
-          .select('*')
-          .order('changed_at', { ascending: false })
-          .limit(200),
-      ]);
+    const [
+      deptRes,
+      catRes,
+      profRes,
+      budRes,
+      projRes,
+      projOwnersRes,
+      projDeptOwnersRes,
+      riskRes,
+      actionRes,
+      auditRes,
+    ] = await Promise.all([
+      supabase.from('departments').select('*').order('name', { ascending: true }),
+      supabase.from('categories').select('*').order('name', { ascending: true }),
+      supabase
+        .from('profiles')
+        .select('id, full_name, email, role, department_id, campus')
+        .order('full_name', { ascending: true }),
+      supabase
+        .from('department_budgets')
+        .select('*')
+        .order('updated_at', { ascending: false }),
+      supabase
+        .from('projects')
+        .select('*')
+        .order('priority_score', { ascending: false }),
+      supabase.from('project_owners').select('project_id, user_id, created_at'),
+      supabase
+        .from('project_department_owners')
+        .select('project_id, department_id, created_at'),
+      supabase.from('risks').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('leadership_actions')
+        .select('*')
+        .order('due_date', { ascending: true }),
+      supabase
+        .from('audit_logs')
+        .select('*')
+        .order('changed_at', { ascending: false })
+        .limit(200),
+    ]);
 
     const firstError =
       deptRes.error ||
@@ -235,6 +274,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       profRes.error ||
       budRes.error ||
       projRes.error ||
+      projOwnersRes.error ||
+      projDeptOwnersRes.error ||
       riskRes.error ||
       actionRes.error;
 
@@ -250,6 +291,10 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setProfiles((profRes.data ?? []) as Profile[]);
       setBudgets((budRes.data ?? []) as DepartmentBudget[]);
       setRawProjects((projRes.data ?? []) as Project[]);
+      setProjectOwners((projOwnersRes.data ?? []) as ProjectOwnerEntry[]);
+      setProjectDepartmentOwners(
+        (projDeptOwnersRes.data ?? []) as ProjectDepartmentOwnerEntry[]
+      );
       setRawRisks((riskRes.data ?? []) as Risk[]);
       setRawActions((actionRes.data ?? []) as LeadershipAction[]);
       setAuditLogs((auditRes.data ?? []) as AuditLog[]);
@@ -280,6 +325,16 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () =>
         refreshAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'project_owners' },
+        () => refreshAll()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'project_department_owners' },
+        () => refreshAll()
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, () =>
         refreshAll()
@@ -321,33 +376,90 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [profMap]
   );
 
-  // Hydrate display labels onto projects
+  const ownersByProject = useMemo(() => {
+    const map = new Map<string, string[]>();
+    projectOwners.forEach((row) => {
+      const curr = map.get(row.project_id) ?? [];
+      if (!curr.includes(row.user_id)) curr.push(row.user_id);
+      map.set(row.project_id, curr);
+    });
+    return map;
+  }, [projectOwners]);
+
+  const deptOwnersByProject = useMemo(() => {
+    const map = new Map<string, string[]>();
+    projectDepartmentOwners.forEach((row) => {
+      const curr = map.get(row.project_id) ?? [];
+      if (!curr.includes(row.department_id)) curr.push(row.department_id);
+      map.set(row.project_id, curr);
+    });
+    return map;
+  }, [projectDepartmentOwners]);
+
+  // Hydrate display labels & multi-owner arrays onto projects
   const hydratedProjects = useMemo(() => {
-    return rawProjects.map((p) => ({
-      ...p,
-      category: getCategoryName(p.category_id),
-      project_manager_name: getProfileName(p.project_manager_id),
-      owner_name: getProfileName(p.owner_id),
-    }));
-  }, [getCategoryName, getProfileName, rawProjects]);
+    return rawProjects.map((p) => {
+      const junctionOwners = ownersByProject.get(p.id) ?? [];
+      const ownerIds =
+        junctionOwners.length > 0
+          ? junctionOwners
+          : p.owner_id
+          ? [p.owner_id]
+          : [];
+      const ownerDeptIds = deptOwnersByProject.get(p.id) ?? p.owner_department_ids ?? [];
+      const ownerNames = ownerIds.map((uid) => getProfileName(uid));
+      const ownerDeptNames = ownerDeptIds.map((did) => getDepartmentName(did));
+      const combinedLabel =
+        ownerNames.length > 0
+          ? ownerNames.join(', ')
+          : ownerDeptNames.length > 0
+          ? ownerDeptNames.map((name) => `${name} Dept`).join(', ')
+          : 'Unassigned';
+
+      return {
+        ...p,
+        owner_ids: ownerIds,
+        owner_department_ids: ownerDeptIds,
+        owner_names: ownerNames,
+        owner_department_names: ownerDeptNames,
+        category: getCategoryName(p.category_id),
+        project_manager_name: getProfileName(p.project_manager_id),
+        owner_name: combinedLabel,
+      };
+    });
+  }, [
+    deptOwnersByProject,
+    getCategoryName,
+    getDepartmentName,
+    getProfileName,
+    ownersByProject,
+    rawProjects,
+  ]);
 
   // Role-based visibility (before global Department Selector filter)
   const allVisibleProjects = useMemo(() => {
     if (isOrgWide) return hydratedProjects;
     if (role === 'Department Admin' || role === 'Project Manager') {
-      return hydratedProjects.filter((p) => p.department_id === departmentId);
+      return hydratedProjects.filter(
+        (p) =>
+          p.department_id === departmentId ||
+          isProjectAssignedToOwner(p, profile) ||
+          isProjectAssignedToDepartment(p, departmentId)
+      );
     }
-    // Project Owner: strictly within their department AND assigned to them
+    // Project Owner: assigned directly as co-owner OR shared with their department
     return hydratedProjects.filter(
-      (p) => p.department_id === departmentId && isProjectAssignedToOwner(p, profile)
+      (p) =>
+        isProjectAssignedToOwner(p, profile) ||
+        isProjectAssignedToDepartment(p, departmentId)
     );
   }, [departmentId, hydratedProjects, isOrgWide, profile, role]);
 
   // Apply Department Selector filter for Super Admin / Executive
   const visibleProjects = useMemo(() => {
-    if (selectedDepartmentId === 'ALL') return allVisibleProjects;
+    if (!isOrgWide || selectedDepartmentId === 'ALL') return allVisibleProjects;
     return allVisibleProjects.filter((p) => p.department_id === selectedDepartmentId);
-  }, [allVisibleProjects, selectedDepartmentId]);
+  }, [allVisibleProjects, isOrgWide, selectedDepartmentId]);
 
   const visibleProjectIds = useMemo(
     () => new Set(visibleProjects.map((p) => p.id)),
@@ -799,6 +911,78 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return `GSL-PROJECT-${String(maxNum + 1).padStart(3, '0')}`;
   }, []);
 
+  const syncProjectOwnershipInSupabase = useCallback(
+    async (
+      projectId: string,
+      nextOwnerIds: string[],
+      nextDeptIds: string[]
+    ): Promise<string | null> => {
+      if (!supabase) return null;
+      const desiredUsers = Array.from(new Set(nextOwnerIds.filter(Boolean)));
+      const desiredDepts = Array.from(new Set(nextDeptIds.filter(Boolean)));
+
+      const existingUsers = projectOwners
+        .filter((r) => r.project_id === projectId)
+        .map((r) => r.user_id);
+      const existingDepts = projectDepartmentOwners
+        .filter((r) => r.project_id === projectId)
+        .map((r) => r.department_id);
+
+      const usersToAdd = desiredUsers.filter((u) => !existingUsers.includes(u));
+      const usersToRemove = existingUsers.filter((u) => !desiredUsers.includes(u));
+      const deptsToAdd = desiredDepts.filter((d) => !existingDepts.includes(d));
+      const deptsToRemove = existingDepts.filter((d) => !desiredDepts.includes(d));
+
+      if (usersToRemove.length > 0) {
+        const { error } = await supabase
+          .from('project_owners')
+          .delete()
+          .eq('project_id', projectId)
+          .in('user_id', usersToRemove);
+        if (error) return error.message;
+      }
+      if (usersToAdd.length > 0) {
+        const { error } = await supabase
+          .from('project_owners')
+          .insert(usersToAdd.map((user_id) => ({ project_id: projectId, user_id })));
+        if (error) return error.message;
+      }
+      if (deptsToRemove.length > 0) {
+        const { error } = await supabase
+          .from('project_department_owners')
+          .delete()
+          .eq('project_id', projectId)
+          .in('department_id', deptsToRemove);
+        if (error) return error.message;
+      }
+      if (deptsToAdd.length > 0) {
+        const { error } = await supabase
+          .from('project_department_owners')
+          .insert(
+            deptsToAdd.map((department_id) => ({
+              project_id: projectId,
+              department_id,
+            }))
+          );
+        if (error) return error.message;
+      }
+
+      setProjectOwners((curr) => [
+        ...curr.filter((r) => r.project_id !== projectId),
+        ...desiredUsers.map((user_id) => ({ project_id: projectId, user_id })),
+      ]);
+      setProjectDepartmentOwners((curr) => [
+        ...curr.filter((r) => r.project_id !== projectId),
+        ...desiredDepts.map((department_id) => ({
+          project_id: projectId,
+          department_id,
+        })),
+      ]);
+      return null;
+    },
+    [projectDepartmentOwners, projectOwners]
+  );
+
   const createProject = useCallback(
     async (input: ProjectInput): Promise<boolean> => {
       if (!canCreateProject) {
@@ -806,10 +990,21 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
+      const cleanOwnerIds = Array.from(
+        new Set((input.owner_ids ?? (input.owner_id ? [input.owner_id] : [])).filter(Boolean))
+      );
+      const cleanDeptOwnerIds = Array.from(
+        new Set((input.owner_department_ids ?? []).filter(Boolean))
+      );
+      const primaryOwnerId = cleanOwnerIds[0] ?? null;
+
       if (!isSupabaseConfigured || !supabase) {
         const nextCode = generateNextDemoProjectCode(rawProjects);
         const created: Project = {
           ...input,
+          owner_id: primaryOwnerId,
+          owner_ids: cleanOwnerIds,
+          owner_department_ids: cleanDeptOwnerIds,
           id: `demo-${Date.now()}`,
           project_code: nextCode,
           priority_score: computePriorityScore(
@@ -820,15 +1015,32 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ),
         };
         setRawProjects((curr) => [created, ...curr]);
+        setProjectOwners((curr) => [
+          ...curr,
+          ...cleanOwnerIds.map((user_id) => ({ project_id: created.id, user_id })),
+        ]);
+        setProjectDepartmentOwners((curr) => [
+          ...curr,
+          ...cleanDeptOwnerIds.map((department_id) => ({
+            project_id: created.id,
+            department_id,
+          })),
+        ]);
         pushToast({ type: 'success', title: 'Project created', message: nextCode });
         return true;
       }
 
-      const { project_code: _omit, ...insertPayload } = input;
+      const {
+        project_code: _omit,
+        owner_ids: _omitOwners,
+        owner_department_ids: _omitDepts,
+        ...insertPayload
+      } = input;
       const { data, error } = await supabase
         .from('projects')
         .insert({
           ...insertPayload,
+          owner_id: primaryOwnerId,
           project_code: '',
           created_by: profile?.id ?? null,
           updated_by: profile?.id ?? null,
@@ -842,11 +1054,31 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const created = data as Project;
+      const syncErr = await syncProjectOwnershipInSupabase(
+        created.id,
+        cleanOwnerIds,
+        cleanDeptOwnerIds
+      );
+      if (syncErr) {
+        pushToast({
+          type: 'error',
+          title: 'Project created, but ownership assignment failed',
+          message: syncErr,
+        });
+      }
+
       setRawProjects((curr) => [created, ...curr]);
       pushToast({ type: 'success', title: 'Project created', message: created.project_code });
       return true;
     },
-    [canCreateProject, generateNextDemoProjectCode, profile?.id, pushToast, rawProjects]
+    [
+      canCreateProject,
+      generateNextDemoProjectCode,
+      profile?.id,
+      pushToast,
+      rawProjects,
+      syncProjectOwnershipInSupabase,
+    ]
   );
 
   const updateProject = useCallback(
@@ -854,11 +1086,56 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const target = assertProjectEdit(id);
       if (!target) return false;
 
+      const existingOwnerIds =
+        projectOwners.filter((r) => r.project_id === id).map((r) => r.user_id);
+      const existingDeptIds =
+        projectDepartmentOwners
+          .filter((r) => r.project_id === id)
+          .map((r) => r.department_id);
+
+      const nextOwnerIds =
+        canManageOwnership && input.owner_ids !== undefined
+          ? Array.from(new Set(input.owner_ids.filter(Boolean)))
+          : existingOwnerIds;
+      const nextDeptIds =
+        canManageOwnership && input.owner_department_ids !== undefined
+          ? Array.from(new Set(input.owner_department_ids.filter(Boolean)))
+          : existingDeptIds;
+
+      const {
+        project_code: _omitCode,
+        owner_ids: _omitOwners,
+        owner_department_ids: _omitDepts,
+        department_id: inputDeptId,
+        owner_id: inputOwnerId,
+        ...deliveryFields
+      } = input;
+
+      const safeFields: Record<string, unknown> = {
+        ...deliveryFields,
+        ...(canManageOwnership && inputDeptId !== undefined
+          ? { department_id: inputDeptId }
+          : {}),
+        ...(canManageOwnership
+          ? {
+              owner_id:
+                input.owner_ids !== undefined
+                  ? nextOwnerIds[0] ?? null
+                  : inputOwnerId,
+            }
+          : {}),
+      };
+
       if (!isSupabaseConfigured || !supabase) {
         setRawProjects((curr) =>
           curr.map((p) => {
             if (p.id !== id) return p;
-            const merged = { ...p, ...input };
+            const merged = {
+              ...p,
+              ...safeFields,
+              owner_ids: nextOwnerIds,
+              owner_department_ids: nextDeptIds,
+            } as Project;
             return {
               ...merged,
               priority_score: computePriorityScore(
@@ -870,6 +1147,36 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             };
           })
         );
+        if (canManageOwnership) {
+          if (input.owner_ids !== undefined) {
+            setProjectOwners((curr) => [
+              ...curr.filter((r) => r.project_id !== id),
+              ...nextOwnerIds.map((user_id) => ({ project_id: id, user_id })),
+            ]);
+            recordDemoAudit(
+              id,
+              'co_owners',
+              existingOwnerIds.map(getProfileName).join(', ') || 'None',
+              nextOwnerIds.map(getProfileName).join(', ') || 'None'
+            );
+          }
+          if (input.owner_department_ids !== undefined) {
+            setProjectDepartmentOwners((curr) => [
+              ...curr.filter((r) => r.project_id !== id),
+              ...nextDeptIds.map((department_id) => ({
+                project_id: id,
+                department_id,
+              })),
+            ]);
+            recordDemoAudit(
+              id,
+              'department_owners',
+              existingDeptIds.map(getDepartmentName).join(', ') || 'None',
+              nextDeptIds.map(getDepartmentName).join(', ') || 'None'
+            );
+          }
+        }
+
         const trackedFields: Array<keyof ProjectInput> = [
           'name',
           'rag_status',
@@ -877,7 +1184,6 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           'percent_complete',
           'approved_budget',
           'actual_spend',
-          'owner_id',
           'project_manager_id',
           'target_end_date',
           'department_id',
@@ -885,19 +1191,18 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           'next_milestone',
         ];
         trackedFields.forEach((field) => {
-          if (input[field] !== undefined) {
-            recordDemoAudit(id, field, target[field], input[field]);
+          if (safeFields[field] !== undefined) {
+            recordDemoAudit(id, field, target[field], safeFields[field]);
           }
         });
         pushToast({ type: 'success', title: 'Project saved' });
         return true;
       }
 
-      const { project_code: _omit, ...safeInput } = input;
       const { data, error } = await supabase
         .from('projects')
         .update({
-          ...safeInput,
+          ...safeFields,
           updated_by: profile?.id ?? null,
         })
         .eq('id', id)
@@ -909,11 +1214,34 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
+      if (canManageOwnership && (input.owner_ids !== undefined || input.owner_department_ids !== undefined)) {
+        const syncErr = await syncProjectOwnershipInSupabase(id, nextOwnerIds, nextDeptIds);
+        if (syncErr) {
+          pushToast({
+            type: 'error',
+            title: 'Project saved, but ownership update failed',
+            message: syncErr,
+          });
+          return false;
+        }
+      }
+
       setRawProjects((curr) => curr.map((p) => (p.id === id ? (data as Project) : p)));
       pushToast({ type: 'success', title: 'Project saved' });
       return true;
     },
-    [assertProjectEdit, profile?.id, pushToast, recordDemoAudit]
+    [
+      assertProjectEdit,
+      canManageOwnership,
+      getDepartmentName,
+      getProfileName,
+      profile?.id,
+      projectDepartmentOwners,
+      projectOwners,
+      pushToast,
+      recordDemoAudit,
+      syncProjectOwnershipInSupabase,
+    ]
   );
 
   const bulkImportProjects = useCallback(
@@ -941,6 +1269,9 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 ? nextList[existingIdx]
                 : { id: `import-${Date.now()}-${idx}` }),
               ...item,
+              owner_id: item.owner_ids?.[0] ?? item.owner_id ?? null,
+              owner_ids: item.owner_ids ?? (item.owner_id ? [item.owner_id] : []),
+              owner_department_ids: item.owner_department_ids ?? [],
               project_code: code,
               priority_score: computePriorityScore(
                 item.business_impact,
@@ -967,30 +1298,58 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       let importedCount = 0;
       for (const item of items) {
-        const hasCode = Boolean(item.project_code && item.project_code.trim() !== '');
+        const {
+          owner_ids,
+          owner_department_ids,
+          project_code: rawCode,
+          ...rest
+        } = item;
+        const cleanOwners = Array.from(
+          new Set((owner_ids ?? (rest.owner_id ? [rest.owner_id] : [])).filter(Boolean))
+        );
+        const cleanDepts = Array.from(new Set((owner_department_ids ?? []).filter(Boolean)));
+        const hasCode = Boolean(rawCode && rawCode.trim() !== '');
+
+        let savedId: string | null = null;
         if (hasCode) {
-          const { error } = await supabase
+          const { data, error } = await supabase
             .from('projects')
             .upsert(
-              { ...item, updated_by: profile?.id ?? null },
+              {
+                ...rest,
+                project_code: rawCode!.trim(),
+                owner_id: cleanOwners[0] ?? null,
+                updated_by: profile?.id ?? null,
+              },
               { onConflict: 'project_code' }
-            );
+            )
+            .select('id')
+            .single();
           if (error) {
             pushToast({ type: 'error', title: 'Excel import error', message: error.message });
             return importedCount;
           }
+          savedId = data?.id ?? null;
         } else {
-          const { project_code: _omit, ...rest } = item;
-          const { error } = await supabase.from('projects').insert({
-            ...rest,
-            project_code: '',
-            created_by: profile?.id ?? null,
-            updated_by: profile?.id ?? null,
-          });
+          const { data, error } = await supabase
+            .from('projects')
+            .insert({
+              ...rest,
+              owner_id: cleanOwners[0] ?? null,
+              project_code: '',
+              created_by: profile?.id ?? null,
+              updated_by: profile?.id ?? null,
+            })
+            .select('id')
+            .single();
           if (error) {
             pushToast({ type: 'error', title: 'Excel import error', message: error.message });
             return importedCount;
           }
+          savedId = data?.id ?? null;
+        }
+        if (savedId && (cleanOwners.length > 0 || cleanDepts.length > 0)) {
+          await syncProjectOwnershipInSupabase(savedId, cleanOwners, cleanDepts);
         }
         importedCount += 1;
       }
@@ -1003,7 +1362,14 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
       return importedCount;
     },
-    [canCreateProject, generateNextDemoProjectCode, profile?.id, pushToast, refreshAll]
+    [
+      canCreateProject,
+      generateNextDemoProjectCode,
+      profile?.id,
+      pushToast,
+      refreshAll,
+      syncProjectOwnershipInSupabase,
+    ]
   );
 
   const deleteProject = useCallback(
@@ -1016,6 +1382,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (!isSupabaseConfigured || !supabase) {
         setRawProjects((curr) => curr.filter((p) => p.id !== id));
+        setProjectOwners((curr) => curr.filter((r) => r.project_id !== id));
+        setProjectDepartmentOwners((curr) => curr.filter((r) => r.project_id !== id));
         setRawRisks((curr) => curr.filter((r) => r.project_id !== id));
         setRawActions((curr) => curr.filter((a) => a.project_id !== id));
         pushToast({ type: 'success', title: 'Project deleted' });
@@ -1029,6 +1397,8 @@ export const PortfolioProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       setRawProjects((curr) => curr.filter((p) => p.id !== id));
+      setProjectOwners((curr) => curr.filter((r) => r.project_id !== id));
+      setProjectDepartmentOwners((curr) => curr.filter((r) => r.project_id !== id));
       pushToast({ type: 'success', title: 'Project deleted' });
       return true;
     },

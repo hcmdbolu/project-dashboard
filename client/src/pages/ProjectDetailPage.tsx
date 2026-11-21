@@ -40,6 +40,7 @@ export const ProjectDetailPage: React.FC = () => {
     departmentId,
     isSuperAdmin,
     canCreateProject,
+    canManageOwnership,
     canEditProject,
     canDeleteProject,
   } = useAuth();
@@ -363,10 +364,33 @@ export const ProjectDetailPage: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-slate-500">Project Owner</p>
-                <p className="mt-0.5 font-semibold text-slate-900">
-                  {project.owner_name || 'Unassigned'}
-                </p>
+                <p className="text-slate-500">Project Co-Owners</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {(project.owner_names?.length ?? 0) > 0 ? (
+                    project.owner_names!.map((name, idx) => (
+                      <span
+                        key={`${project.id}-detail-owner-${idx}`}
+                        className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800 ring-1 ring-inset ring-blue-200"
+                      >
+                        {name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="font-semibold text-slate-900">Unassigned</span>
+                  )}
+                </div>
+                {(project.owner_department_names?.length ?? 0) > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {project.owner_department_names!.map((deptName, idx) => (
+                      <span
+                        key={`${project.id}-detail-dept-${idx}`}
+                        className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-800 ring-1 ring-inset ring-teal-200"
+                      >
+                        Dept: {deptName}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <p className="text-slate-500">Technical Lead</p>
@@ -820,6 +844,7 @@ export const ProjectDetailPage: React.FC = () => {
         allProjects={allVisibleProjects}
         lockedDepartmentId={isSuperAdmin ? null : departmentId}
         canAddCategory={canCreateProject}
+        canManageOwnership={canManageOwnership}
         onCreateCategory={createCategory}
         onClose={() => setEditOpen(false)}
         onSubmit={(payload) => updateProject(project.id, payload)}

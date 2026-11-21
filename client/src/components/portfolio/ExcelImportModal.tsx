@@ -260,6 +260,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         campus: campusMatch.val,
         project_manager_id: null,
         owner_id: null,
+        owner_ids: [],
+        owner_department_ids: [],
         technical_lead_name:
           pickField(raw, ['technical_lead', 'technical_lead_name']) || 'Department Lead',
         approval_authority:

@@ -139,11 +139,41 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
-            <div className="rounded-xl bg-slate-50 p-3">
-              <p className="font-semibold text-slate-500">Project Owner</p>
-              <p className="mt-0.5 font-semibold text-slate-900">
-                {project.owner_name || 'Unassigned'}
+            <div className="rounded-xl bg-slate-50 p-3 sm:col-span-2">
+              <p className="font-semibold text-slate-500">
+                Project Co-Owners (View &amp; Edit)
               </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {(project.owner_names?.length ?? 0) > 0 ? (
+                  project.owner_names!.map((name, idx) => (
+                    <span
+                      key={`${project.id}-drawer-owner-${idx}`}
+                      className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-800 ring-1 ring-inset ring-blue-200"
+                    >
+                      {name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="font-semibold text-slate-900">Unassigned</span>
+                )}
+              </div>
+              {(project.owner_department_names?.length ?? 0) > 0 && (
+                <div className="mt-2 border-t border-slate-200/80 pt-2">
+                  <p className="text-[11px] font-semibold text-slate-500">
+                    Department Owners (View Access)
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {project.owner_department_names!.map((deptName, idx) => (
+                      <span
+                        key={`${project.id}-drawer-dept-${idx}`}
+                        className="inline-flex items-center rounded-full bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-800 ring-1 ring-inset ring-teal-200"
+                      >
+                        {deptName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="rounded-xl bg-slate-50 p-3">
               <p className="font-semibold text-slate-500">Project Manager</p>

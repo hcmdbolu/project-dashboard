@@ -186,6 +186,21 @@ CREATE TABLE public.projects (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- 7b. Multi-Owner & Department-Owner Junction Tables
+CREATE TABLE public.project_owners (
+  project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, user_id)
+);
+
+CREATE TABLE public.project_department_owners (
+  project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  department_id uuid NOT NULL REFERENCES public.departments(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, department_id)
+);
+
 -- 8. Risks & Leadership Actions (Department-Partitioned)
 CREATE TABLE public.risks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -237,6 +252,10 @@ CREATE INDEX idx_projects_pm_id ON public.projects (project_manager_id);
 CREATE INDEX idx_projects_campus ON public.projects (campus);
 CREATE INDEX idx_projects_rag_status ON public.projects (rag_status);
 CREATE INDEX idx_projects_priority ON public.projects (priority_score DESC);
+CREATE INDEX idx_project_owners_project_id ON public.project_owners (project_id);
+CREATE INDEX idx_project_owners_user_id ON public.project_owners (user_id);
+CREATE INDEX idx_project_dept_owners_project_id ON public.project_department_owners (project_id);
+CREATE INDEX idx_project_dept_owners_department_id ON public.project_department_owners (department_id);
 CREATE INDEX idx_risks_project_id ON public.risks (project_id);
 CREATE INDEX idx_risks_department_id ON public.risks (department_id);
 CREATE INDEX idx_actions_project_id ON public.leadership_actions (project_id);
@@ -389,6 +408,82 @@ CREATE TRIGGER trg_projects_audit
   AFTER UPDATE ON public.projects
   FOR EACH ROW EXECUTE FUNCTION public.log_project_audit_changes();
 
+CREATE OR REPLACE FUNCTION public.log_project_co_owner_changes()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_label text;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    SELECT COALESCE(NULLIF(btrim(full_name), ''), email, NEW.user_id::text)
+    INTO v_label
+    FROM public.profiles
+    WHERE id = NEW.user_id;
+
+    INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+    VALUES (NEW.project_id, auth.uid(), 'co_owners', NULL, 'Added: ' || COALESCE(v_label, NEW.user_id::text));
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM public.projects WHERE id = OLD.project_id) THEN
+      SELECT COALESCE(NULLIF(btrim(full_name), ''), email, OLD.user_id::text)
+      INTO v_label
+      FROM public.profiles
+      WHERE id = OLD.user_id;
+
+      INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+      VALUES (OLD.project_id, auth.uid(), 'co_owners', 'Removed: ' || COALESCE(v_label, OLD.user_id::text), NULL);
+    END IF;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.log_project_dept_owner_changes()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_label text;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    SELECT COALESCE(name, NEW.department_id::text)
+    INTO v_label
+    FROM public.departments
+    WHERE id = NEW.department_id;
+
+    INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+    VALUES (NEW.project_id, auth.uid(), 'department_owners', NULL, 'Added: ' || COALESCE(v_label, NEW.department_id::text));
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM public.projects WHERE id = OLD.project_id) THEN
+      SELECT COALESCE(name, OLD.department_id::text)
+      INTO v_label
+      FROM public.departments
+      WHERE id = OLD.department_id;
+
+      INSERT INTO public.audit_logs (project_id, changed_by, field_name, old_value, new_value)
+      VALUES (OLD.project_id, auth.uid(), 'department_owners', 'Removed: ' || COALESCE(v_label, OLD.department_id::text), NULL);
+    END IF;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_project_owners_audit
+  AFTER INSERT OR DELETE ON public.project_owners
+  FOR EACH ROW EXECUTE FUNCTION public.log_project_co_owner_changes();
+
+CREATE TRIGGER trg_project_dept_owners_audit
+  AFTER INSERT OR DELETE ON public.project_department_owners
+  FOR EACH ROW EXECUTE FUNCTION public.log_project_dept_owner_changes();
+
 -- Auto-provision least-privilege 'Executive' profile on self-signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
@@ -435,12 +530,125 @@ AS $$
   SELECT department_id FROM public.profiles WHERE id = auth.uid();
 $$;
 
+CREATE OR REPLACE FUNCTION public.is_project_co_owner(_project_id uuid, _user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.project_owners po
+    WHERE po.project_id = _project_id
+      AND po.user_id = _user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_project_dept_owner(_project_id uuid, _dept_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT _dept_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM public.project_department_owners pdo
+      WHERE pdo.project_id = _project_id
+        AND pdo.department_id = _dept_id
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_view_project(_project_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.current_user_role() IN ('Super Admin', 'Executive')
+    OR EXISTS (
+      SELECT 1
+      FROM public.projects p
+      WHERE p.id = _project_id
+        AND (
+          (
+            public.current_user_role() IN ('Department Admin', 'Project Manager')
+            AND p.department_id = public.current_user_department_id()
+          )
+          OR public.is_project_co_owner(p.id, auth.uid())
+          OR public.is_project_dept_owner(p.id, public.current_user_department_id())
+        )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_edit_project(_project_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.current_user_role() = 'Super Admin'
+    OR EXISTS (
+      SELECT 1
+      FROM public.projects p
+      WHERE p.id = _project_id
+        AND (
+          (
+            public.current_user_role() IN ('Department Admin', 'Project Manager')
+            AND p.department_id = public.current_user_department_id()
+          )
+          OR public.is_project_co_owner(p.id, auth.uid())
+        )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_manage_project_ownership(_project_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.current_user_role() = 'Super Admin'
+    OR EXISTS (
+      SELECT 1
+      FROM public.projects p
+      WHERE p.id = _project_id
+        AND public.current_user_role() IN ('Department Admin', 'Project Manager')
+        AND p.department_id = public.current_user_department_id()
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.project_primary_department_unchanged(_project_id uuid, _new_dept_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.projects p
+    WHERE p.id = _project_id
+      AND p.department_id = _new_dept_id
+  );
+$$;
+
 -- 13. Row-Level Security (5-Role Multi-Department Matrix)
 ALTER TABLE public.departments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.department_budgets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_owners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_department_owners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.risks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leadership_actions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
@@ -485,11 +693,7 @@ CREATE POLICY "Super Admin can delete categories"
 -- Profiles
 CREATE POLICY "Role-scoped profile reads"
   ON public.profiles FOR SELECT TO authenticated
-  USING (
-    public.current_user_role() IN ('Super Admin', 'Executive')
-    OR id = auth.uid()
-    OR department_id = public.current_user_department_id()
-  );
+  USING (true);
 
 CREATE POLICY "Users can update own full_name only"
   ON public.profiles FOR UPDATE TO authenticated
@@ -545,18 +749,7 @@ CREATE POLICY "Only Super Admin deletes department budgets"
 -- Projects
 CREATE POLICY "Role-scoped project reads"
   ON public.projects FOR SELECT TO authenticated
-  USING (
-    public.current_user_role() IN ('Super Admin', 'Executive')
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND department_id = public.current_user_department_id()
-      AND owner_id = auth.uid()
-    )
-  );
+  USING (public.can_view_project(id));
 
 CREATE POLICY "Super Admin, Dept Admin, and PM insert projects in scope"
   ON public.projects FOR INSERT TO authenticated
@@ -570,18 +763,7 @@ CREATE POLICY "Super Admin, Dept Admin, and PM insert projects in scope"
 
 CREATE POLICY "Role-scoped project updates"
   ON public.projects FOR UPDATE TO authenticated
-  USING (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND department_id = public.current_user_department_id()
-      AND owner_id = auth.uid()
-    )
-  )
+  USING (public.can_edit_project(id))
   WITH CHECK (
     public.current_user_role() = 'Super Admin'
     OR (
@@ -589,9 +771,8 @@ CREATE POLICY "Role-scoped project updates"
       AND department_id = public.current_user_department_id()
     )
     OR (
-      public.current_user_role() = 'Project Owner'
-      AND department_id = public.current_user_department_id()
-      AND owner_id = auth.uid()
+      public.is_project_co_owner(id, auth.uid())
+      AND public.project_primary_department_unchanged(id, department_id)
     )
   );
 
@@ -605,82 +786,45 @@ CREATE POLICY "Super Admin and scoped Dept Admin delete projects"
     )
   );
 
+-- Project Owners (Co-Owners)
+CREATE POLICY "Project co-owner reads"
+  ON public.project_owners FOR SELECT TO authenticated
+  USING (public.can_view_project(project_id));
+
+CREATE POLICY "Admins and PMs insert project co-owners"
+  ON public.project_owners FOR INSERT TO authenticated
+  WITH CHECK (public.can_manage_project_ownership(project_id));
+
+CREATE POLICY "Admins and PMs delete project co-owners"
+  ON public.project_owners FOR DELETE TO authenticated
+  USING (public.can_manage_project_ownership(project_id));
+
+-- Project Department Owners (Department-Wide View Access)
+CREATE POLICY "Project dept-owner reads"
+  ON public.project_department_owners FOR SELECT TO authenticated
+  USING (public.can_view_project(project_id));
+
+CREATE POLICY "Admins and PMs insert project dept-owners"
+  ON public.project_department_owners FOR INSERT TO authenticated
+  WITH CHECK (public.can_manage_project_ownership(project_id));
+
+CREATE POLICY "Admins and PMs delete project dept-owners"
+  ON public.project_department_owners FOR DELETE TO authenticated
+  USING (public.can_manage_project_ownership(project_id));
+
 -- Risks
 CREATE POLICY "Role-scoped risks reads"
   ON public.risks FOR SELECT TO authenticated
-  USING (
-    public.current_user_role() IN ('Super Admin', 'Executive')
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  USING (public.can_view_project(project_id));
 
 CREATE POLICY "Role-scoped risks insert"
   ON public.risks FOR INSERT TO authenticated
-  WITH CHECK (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id AND p.department_id = public.current_user_department_id()
-      )
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  WITH CHECK (public.can_edit_project(project_id));
 
 CREATE POLICY "Role-scoped risks update"
   ON public.risks FOR UPDATE TO authenticated
-  USING (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  )
-  WITH CHECK (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  USING (public.can_edit_project(project_id))
+  WITH CHECK (public.can_edit_project(project_id));
 
 CREATE POLICY "Super Admin and scoped Dept Admin delete risks"
   ON public.risks FOR DELETE TO authenticated
@@ -695,79 +839,16 @@ CREATE POLICY "Super Admin and scoped Dept Admin delete risks"
 -- Leadership Actions
 CREATE POLICY "Role-scoped leadership actions reads"
   ON public.leadership_actions FOR SELECT TO authenticated
-  USING (
-    public.current_user_role() IN ('Super Admin', 'Executive')
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  USING (public.can_view_project(project_id));
 
 CREATE POLICY "Role-scoped leadership actions insert"
   ON public.leadership_actions FOR INSERT TO authenticated
-  WITH CHECK (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id AND p.department_id = public.current_user_department_id()
-      )
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  WITH CHECK (public.can_edit_project(project_id));
 
 CREATE POLICY "Role-scoped leadership actions update"
   ON public.leadership_actions FOR UPDATE TO authenticated
-  USING (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  )
-  WITH CHECK (
-    public.current_user_role() = 'Super Admin'
-    OR (
-      public.current_user_role() IN ('Department Admin', 'Project Manager')
-      AND department_id = public.current_user_department_id()
-    )
-    OR (
-      public.current_user_role() = 'Project Owner'
-      AND EXISTS (
-        SELECT 1 FROM public.projects p
-        WHERE p.id = project_id
-          AND p.department_id = public.current_user_department_id()
-          AND p.owner_id = auth.uid()
-      )
-    )
-  );
+  USING (public.can_edit_project(project_id))
+  WITH CHECK (public.can_edit_project(project_id));
 
 CREATE POLICY "Super Admin and scoped Dept Admin delete leadership actions"
   ON public.leadership_actions FOR DELETE TO authenticated
@@ -782,18 +863,7 @@ CREATE POLICY "Super Admin and scoped Dept Admin delete leadership actions"
 -- Audit Logs (read-only for users matching project visibility)
 CREATE POLICY "Role-scoped audit log reads"
   ON public.audit_logs FOR SELECT TO authenticated
-  USING (
-    public.current_user_role() IN ('Super Admin', 'Executive')
-    OR EXISTS (
-      SELECT 1 FROM public.projects p
-      WHERE p.id = project_id
-        AND p.department_id = public.current_user_department_id()
-        AND (
-          public.current_user_role() IN ('Department Admin', 'Project Manager')
-          OR (public.current_user_role() = 'Project Owner' AND p.owner_id = auth.uid())
-        )
-    )
-  );
+  USING (public.can_view_project(project_id));
 
 -- 14. Enable Supabase Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE
@@ -801,6 +871,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE
   public.categories,
   public.department_budgets,
   public.projects,
+  public.project_owners,
+  public.project_department_owners,
   public.risks,
   public.leadership_actions;
 
@@ -812,3 +884,9 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.current_user_department_id() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_project_co_owner(uuid, uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_project_dept_owner(uuid, uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.can_view_project(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.can_edit_project(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.can_manage_project_ownership(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.project_primary_department_unchanged(uuid, uuid) TO authenticated, service_role;

@@ -55,7 +55,12 @@ export function isProjectBehindSchedule(project: Project): boolean {
 }
 
 export function hasUnconfirmedOwnership(project: Project): boolean {
-  if (!project.owner_id || !project.project_manager_id) return true;
+  const hasAnyIndividualOwner =
+    (project.owner_ids?.length ?? 0) > 0 || Boolean(project.owner_id);
+  const hasAnyDeptOwner = (project.owner_department_ids?.length ?? 0) > 0;
+  if ((!hasAnyIndividualOwner && !hasAnyDeptOwner) || !project.project_manager_id) {
+    return true;
+  }
   const fields = [project.technical_lead_name, project.approval_authority];
   return fields.some((f) => {
     const normalized = (f || '').trim().toLowerCase();
@@ -78,11 +83,22 @@ export function computePriorityScore(
 }
 
 export function isProjectAssignedToOwner(
-  project: Pick<Project, 'owner_id'>,
+  project: Pick<Project, 'owner_id'> & { owner_ids?: string[] },
   profile: Pick<Profile, 'id'> | null | undefined
 ): boolean {
   if (!profile) return false;
+  if (project.owner_ids && project.owner_ids.includes(profile.id)) {
+    return true;
+  }
   return Boolean(project.owner_id && project.owner_id === profile.id);
+}
+
+export function isProjectAssignedToDepartment(
+  project: { owner_department_ids?: string[] },
+  departmentId: string | null | undefined
+): boolean {
+  if (!departmentId) return false;
+  return Boolean(project.owner_department_ids?.includes(departmentId));
 }
 
 export function computePortfolioKpis(

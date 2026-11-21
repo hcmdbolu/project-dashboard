@@ -20,6 +20,7 @@ export const MasterPortfolioPage: React.FC = () => {
     isSuperAdmin,
     isOrgWide,
     canCreateProject,
+    canManageOwnership,
     canEditProject,
     canDeleteProject,
   } = useAuth();
@@ -62,9 +63,14 @@ export const MasterPortfolioPage: React.FC = () => {
   const ownerOptions = useMemo(() => {
     const map = new Map<string, string>();
     projects.forEach((p) => {
-      if (p.owner_id && p.owner_name) {
-        map.set(p.owner_id, p.owner_name);
-      }
+      (p.owner_ids ?? []).forEach((uid, idx) => {
+        const label = p.owner_names?.[idx];
+        if (uid && label) map.set(uid, label);
+      });
+      (p.owner_department_ids ?? []).forEach((did, idx) => {
+        const deptLabel = p.owner_department_names?.[idx];
+        if (did && deptLabel) map.set(`dept:${did}`, `Dept: ${deptLabel}`);
+      });
     });
     return Array.from(map.entries())
       .map(([id, name]) => ({ id, name }))
@@ -77,7 +83,14 @@ export const MasterPortfolioPage: React.FC = () => {
       if (campusFilter !== 'ALL' && p.campus !== campusFilter) return false;
       if (categoryFilter !== 'ALL' && p.category_id !== categoryFilter) return false;
       if (ragFilter !== 'ALL' && p.rag_status !== ragFilter) return false;
-      if (ownerFilter !== 'ALL' && p.owner_id !== ownerFilter) return false;
+      if (ownerFilter !== 'ALL') {
+        if (ownerFilter.startsWith('dept:')) {
+          const deptId = ownerFilter.slice('dept:'.length);
+          if (!p.owner_department_ids?.includes(deptId)) return false;
+        } else if (!p.owner_ids?.includes(ownerFilter) && p.owner_id !== ownerFilter) {
+          return false;
+        }
+      }
       if (!query) return true;
       return (
         p.project_code.toLowerCase().includes(query) ||
@@ -86,6 +99,8 @@ export const MasterPortfolioPage: React.FC = () => {
         p.expected_benefit.toLowerCase().includes(query) ||
         (p.project_manager_name || '').toLowerCase().includes(query) ||
         (p.owner_name || '').toLowerCase().includes(query) ||
+        (p.owner_names || []).some((n) => n.toLowerCase().includes(query)) ||
+        (p.owner_department_names || []).some((d) => d.toLowerCase().includes(query)) ||
         (p.category || '').toLowerCase().includes(query) ||
         getDepartmentName(p.department_id).toLowerCase().includes(query)
       );
@@ -145,7 +160,8 @@ export const MasterPortfolioPage: React.FC = () => {
       'Status',
       '% Complete',
       'Project Manager',
-      'Project Owner',
+      'Project Co-Owners',
+      'Department Owners',
       'Approved Budget (NGN)',
       'Actual Spend (NGN)',
       'Priority Score',
@@ -162,7 +178,8 @@ export const MasterPortfolioPage: React.FC = () => {
       getRagLabel(p.rag_status),
       String(p.percent_complete),
       p.project_manager_name || '',
-      p.owner_name || '',
+      (p.owner_names ?? []).join('; '),
+      (p.owner_department_names ?? []).join('; '),
       String(p.approved_budget),
       String(p.actual_spend),
       p.priority_score.toFixed(2),
@@ -220,8 +237,8 @@ export const MasterPortfolioPage: React.FC = () => {
         <div className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs text-blue-900">
           <Filter className="h-4 w-4 shrink-0 text-blue-700" />
           <span>
-            Displaying only the <strong>{projects.length}</strong> project(s) assigned
-            to <strong>{profile?.full_name}</strong>.
+            Displaying the <strong>{projects.length}</strong> project(s) assigned to{' '}
+            <strong>{profile?.full_name}</strong> or shared with your department.
           </span>
         </div>
       )}
@@ -261,6 +278,7 @@ export const MasterPortfolioPage: React.FC = () => {
         canDeleteRow={canDeleteProject}
         getDepartmentName={getDepartmentName}
         currentUserId={profile?.id}
+        currentUserDepartmentId={departmentId}
         onInlineUpdate={updateProjectInline}
         onOpenDrawer={setDrawerProject}
         onEditProject={handleOpenEdit}
@@ -292,6 +310,7 @@ export const MasterPortfolioPage: React.FC = () => {
         allProjects={allVisibleProjects}
         lockedDepartmentId={isSuperAdmin ? null : departmentId}
         canAddCategory={canCreateProject}
+        canManageOwnership={canManageOwnership}
         onCreateCategory={createCategory}
         onClose={() => {
           setModalOpen(false);
